@@ -1,0 +1,9 @@
+Servers = 1
+Simulation = "PPSI"
+BF = 5
+Rounds = 1
+Faulty = 0
+
+
+Hosts
+6
