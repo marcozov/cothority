@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/BurntSushi/toml"
-	"github.com/dedis/cothority/ppsi"
+	"github.com/dedis/cothority/ppsi/protocol"
 	"github.com/dedis/cothority/ppsi/lib"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/log"
@@ -59,9 +59,9 @@ func (jvs *Simulation) Run(config *onet.SimulationConfig) error {
 	if err != nil {
 		return err
 	}
-	var rh *ppsi.PPSI
+	var rh *protocol.PPSI
 	
-	rh = client.(*ppsi.PPSI)
+	rh = client.(*protocol.PPSI)
 	rh.EncryptedSets = EncPhones
 	
 	if err := rh.Start(); err != nil {
