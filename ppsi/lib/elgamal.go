@@ -5,11 +5,14 @@ import (
 	"github.com/dedis/crypto/random"
 )
 
+//performs elgamal encryption of a message, with the following invariant:
+//forall message1, message2, if message1==message2 --> M1==M2(two identical messages are encoded into two identical points)
 func ElGamalEncrypt(suite abstract.Suite, pubkey abstract.Point, message []byte) (
 	K, C abstract.Point, remainder []byte) {
 
-	M, remainder := suite.Point().Pick(message, random.Stream)
-
+	seed := []byte{1, 1, 1, 1}
+	cip := suite.Cipher(seed)
+	M, remainder := suite.Point().Pick(message, cip)
 	k := suite.Scalar().Pick(random.Stream)
 	K = suite.Point().Mul(nil, k)
 	S := suite.Point().Mul(pubkey, k)
@@ -17,6 +20,19 @@ func ElGamalEncrypt(suite abstract.Suite, pubkey abstract.Point, message []byte)
 	return
 }
 
+//performs elgamal encryption of a message
+func NonSeededElGamalEncrypt(suite abstract.Suite, pubkey abstract.Point, message []byte) (
+	K, C abstract.Point, remainder []byte) {
+
+	M, remainder := suite.Point().Pick(message, random.Stream)
+	k := suite.Scalar().Pick(random.Stream)
+	K = suite.Point().Mul(nil, k)
+	S := suite.Point().Mul(pubkey, k)
+	C = S.Add(S, M)
+	return
+}
+
+//performs elgamal encryption of a point
 func PartialElGamalEncrypt(suite abstract.Suite, pubkey abstract.Point, M abstract.Point) (
 	K, C abstract.Point, remainder []byte) {
 
@@ -28,7 +44,7 @@ func PartialElGamalEncrypt(suite abstract.Suite, pubkey abstract.Point, M abstra
 	return
 }
 	
-
+//pefroms elgamal decryption, output is a message
 func ElGamalDecrypt(suite abstract.Suite, prikey abstract.Scalar, K, C abstract.Point) (
 	message []byte, err error) {
 
@@ -38,6 +54,7 @@ func ElGamalDecrypt(suite abstract.Suite, prikey abstract.Scalar, K, C abstract.
 	return
 }
 
+//performs elgamal decryption, output is a point
 func PartialElGamalDecrypt(suite abstract.Suite, prikey abstract.Scalar, K, C abstract.Point) (
 	M abstract.Point, err error) {
 
