@@ -34,7 +34,7 @@ type PPSI struct {
 
 	finalIntersection []string
 
-	setsToIntersect int
+	setsToIntersect []int
 
 	NumAuthorities int
 
@@ -268,6 +268,7 @@ func (c *PPSI) handleElgEncryptedMessage(in *ElgEncryptedMessage) error {
 
 //Compute the intersection of the new message with the temporary intersection currently stored in the conode.
 func (c *PPSI) handleFullyPhEncryptedMessage(in *FullyPhEncryptedMessage) error {
+
 	var wantdec int
 	phones := in.Content
 
@@ -278,9 +279,9 @@ func (c *PPSI) handleFullyPhEncryptedMessage(in *FullyPhEncryptedMessage) error 
 		if c.first == true {
 			c.first = false
 		}
-
-		c.setsToIntersect = c.setsToIntersect + 1
-
+		if !c.iContains(c.setsToIntersect, in.ID) {
+			c.setsToIntersect = append(c.setsToIntersect, in.ID)
+		}
 		in.Users[c.Index()] = in.Users[c.Index()] + 1
 		outMsg := &FullyPhEncryptedMessage{
 			Content: in.Content,
@@ -293,7 +294,9 @@ func (c *PPSI) handleFullyPhEncryptedMessage(in *FullyPhEncryptedMessage) error 
 		c.SendTo(c.List()[c.next], outMsg)
 	}
 
-	if c.setsToIntersect == in.Sets && c.dec == false {
+	//	if c.setsToIntersect == in.Sets && c.dec == false {
+	if len(c.setsToIntersect) == in.Sets && c.dec == false {
+
 		c.dec = true
 		if !c.wantToDecrypt() {
 			wantdec = 1
@@ -312,7 +315,6 @@ func (c *PPSI) handleFullyPhEncryptedMessage(in *FullyPhEncryptedMessage) error 
 
 	return nil
 }
-
 //Remove one layer of PH encryption with the conode PH key
 func (c *PPSI) handlePartiallyPhDecryptedMessage(in *PartiallyPhDecryptedMessage) error {
 	if in.WantTodec == 0 {
@@ -466,6 +468,15 @@ func (c *PPSI) computeIntersection(newSet []abstract.Point) {
 func (c *PPSI) Contains(elems []abstract.Point, elem abstract.Point) bool {
 	for i := 0; i < len(elems); i++ {
 		if elems[i].Equal(elem) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *PPSI) iContains(elems []int, elem int) bool {
+	for i := 0; i < len(elems); i++ {
+		if elems[i] == elem {
 			return true
 		}
 	}
