@@ -227,12 +227,14 @@ func (c *PPSI) ExtractPlains(set []abstract.Point) (
 
 }
 
+
 //Create encryption and decryption keys
 func (c *PPSI) createKeys() {
 
+	b:=c.suite.Scalar().Zero()
 	enckey := c.suite.Scalar().Pick(random.Stream)
 
-	for !c.suite.Scalar().Gcd(enckey).Equal(c.suite.Scalar().One()) {
+	for !c.suite.Scalar().Gcd(enckey,b).Equal(c.suite.Scalar().One()) {
 		enckey = c.suite.Scalar().Pick(random.Stream)
 	}
 
