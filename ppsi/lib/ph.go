@@ -23,7 +23,7 @@ func NewPH(suite abstract.Suite) *PH {
 //Create encryption and decryption keys
 
 //Create encryption and decryption keys
-func (c *PPSI) createKeys() {
+func (c *PH) createKeys() {
 
 	b:=c.suite.Scalar().Zero()
 	enckey := c.suite.Scalar().Pick(random.Stream)
