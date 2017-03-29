@@ -154,7 +154,6 @@ func (rh *RandHound) Start() error {
 // Shard produces a pseudorandom sharding of the network entity list
 // based on a seed and a number of requested shards.
 func (rh *RandHound) Shard(seed []byte, shards int) ([][]*onet.TreeNode, [][]abstract.Point, error) {
-
 	if shards == 0 || rh.nodes < shards {
 		return nil, nil, fmt.Errorf("Number of requested shards not supported")
 	}
@@ -657,13 +656,13 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 				// Among the good secrets chosen previously collect all valid
 				// shares, proofs, and polynomial commits intended for the
 				// target server
-				var encShare []Share
-				var polyCommit []abstract.Point
+				var encShare []*pvss.PubVerShare
+				var commit []abstract.Point
 				for _, k := range rh.chosenSecret[i] {
 					r1 := rh.r1s[k]
 					pc := rh.polyCommit[k]
 					encShare = append(encShare, r1.EncShare[j])
-					polyCommit = append(polyCommit, pc[j])
+					commit = append(commit, pc[j])
 				}
 
 				i2 := &I2{
@@ -671,7 +670,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 					SID:          rh.sid,
 					ChosenSecret: chosenSecret,
 					EncShare:     encShare,
-					PolyCommit:   polyCommit,
+					Commit:       commit,
 				}
 
 				if err := signSchnorr(rh.Suite(), rh.Private(), i2); err != nil {
