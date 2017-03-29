@@ -28,34 +28,32 @@ func init() {
 // RandHound is the main protocol struct and implements the
 // onet.ProtocolInstance interface.
 type RandHound struct {
-	*onet.TreeNodeInstance                           // ...
-	mutex                  sync.Mutex                // ...
-	nodes                  int                       // Total number of nodes (client + servers)
-	purpose                string                    // Purpose of protocol run
-	time                   time.Time                 // Timestamp of initiation
-	seed                   []byte                    // Client-chosen seed for sharding
-	sid                    []byte                    // Session identifier
-	groups                 []*Group                  // Group information
-	serverIdxToGroupNum    map[int]int               // Mapping of global server index to group number
-	serverIdxToGroupIdx    map[int]int               // Mapping of global server index to group server index
-	i1s                    map[int]*I1               // I1 messages sent to servers (index: group)
-	i2s                    map[int]*I2               // I2 messages sent to servers (index: server)
-	i3s                    map[int]*I3               // R1 messages received from servers (index: server)
-	r1s                    map[int]*R1               // R2 messages received from servers (index: server)
-	r2s                    map[int]*R2               // TODO
-	r3s                    map[int]*R3               // TODO
-	evalCommit             map[int][]*share.PubShare // Commitments to evaluations of polynomials (index: server) TODO: rename
-	secret                 map[int][]int             // Valid shares per secret/server (source server index -> list of target server indices)
-	chosenSecret           map[int][]int             // Chosen secrets contributing to collective randomness
-	Done                   chan bool                 // Channel to signal the end of a protocol run
-	SecretReady            bool                      // Boolean to indicate whether the collect randomness is ready or not
-	records                map[int][]*Record         // TODO
+	*onet.TreeNodeInstance                         // ...
+	mutex                  sync.Mutex              // ...
+	nodes                  int                     // Total number of nodes (client + servers)
+	purpose                string                  // Purpose of protocol run
+	time                   time.Time               // Timestamp of initiation
+	seed                   []byte                  // Client-chosen seed for sharding
+	sid                    []byte                  // Session identifier
+	groups                 []*Group                // Group information
+	serverIdxToGroupNum    map[int]int             // Mapping of global server index to group number
+	serverIdxToGroupIdx    map[int]int             // Mapping of global server index to group server index
+	i1s                    map[int]*I1             // I1 messages sent to servers (index: group)
+	i2s                    map[int]*I2             // I2 messages sent to servers (index: server)
+	i3s                    map[int]*I3             // R1 messages received from servers (index: server)
+	r1s                    map[int]*R1             // R2 messages received from servers (index: server)
+	r2s                    map[int]*R2             // TODO
+	r3s                    map[int]*R3             // TODO
+	chosenSecret           map[int][]int           // Chosen secrets contributing to collective randomness
+	Done                   chan bool               // Channel to signal the end of a protocol run
+	SecretReady            bool                    // Boolean to indicate whether the collect randomness is ready or not
+	records                map[int]map[int]*Record // [source][target]*Record TODO
 }
 
 // Record ...
 type Record struct {
-	Key abstract.Point // ...
-	//Eval     *share.PubShare   // ...
+	Key      abstract.Point    // ...
+	Eval     *share.PubShare   // ...
 	EncShare *pvss.PubVerShare // ...
 	DecShare *pvss.PubVerShare // ...
 }

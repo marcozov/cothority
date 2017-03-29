@@ -54,12 +54,10 @@ func (rh *RandHound) Setup(nodes int, groups int, purpose string) error {
 	rh.r1s = make(map[int]*R1)
 	rh.r2s = make(map[int]*R2)
 	rh.r3s = make(map[int]*R3)
-	rh.evalCommit = make(map[int][]*share.PubShare)
-	rh.secret = make(map[int][]int)
 	rh.chosenSecret = make(map[int][]int)
 	rh.Done = make(chan bool, 1)
 	rh.SecretReady = false
-	rh.records = make(map[int][]*Record)
+	rh.records = make(map[int]map[int]*Record)
 	return nil
 }
 
@@ -183,22 +181,26 @@ func (rh *RandHound) Random() ([]byte, *Transcript, error) {
 	var X []abstract.Point
 	var encShares []*pvss.PubVerShare
 	var decShares []*pvss.PubVerShare
-	for src, r := range rh.records {
-		grp := rh.serverIdxToGroupNum[src]
-		G := rh.Suite().Point().Base()
-		for i := 0; i < len(r); i++ {
-			X = append(X, r[i].Key)
-			encShares = append(encShares, r[i].EncShare)
-			decShares = append(decShares, r[i].DecShare)
+
+	G := rh.Suite().Point().Base()
+	for i, group := range rh.chosenSecret {
+		for _, src := range group {
+			for _, r := range rh.records[src] {
+				if r.Key != nil && r.EncShare != nil && r.DecShare != nil {
+					X = append(X, r.Key)
+					encShares = append(encShares, r.EncShare)
+					decShares = append(decShares, r.DecShare)
+				}
+			}
+			ps, err := pvss.RecoverSecret(rh.Suite(), G, X, encShares, decShares, rh.groups[i].threshold, len(rh.groups[i].server))
+			if err != nil {
+				return nil, nil, err
+			}
+			rnd = rh.Suite().Point().Add(rnd, ps)
+			X = make([]abstract.Point, 0)
+			encShares = make([]*pvss.PubVerShare, 0)
+			decShares = make([]*pvss.PubVerShare, 0)
 		}
-		ps, err := pvss.RecoverSecret(rh.Suite(), G, X, encShares, decShares, rh.groups[grp].threshold, len(rh.groups[grp].server))
-		if err != nil {
-			return nil, nil, err
-		}
-		rnd = rh.Suite().Point().Add(rnd, ps)
-		X = make([]abstract.Point, 0)
-		encShares = make([]*pvss.PubVerShare, 0)
-		decShares = make([]*pvss.PubVerShare, 0)
 	}
 
 	rb, err := rnd.MarshalBinary()
@@ -614,14 +616,18 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 		sH := pubPoly.Eval(i)
 		key := rh.groups[grp].key[i]
 		if pvss.VerifyEncShare(rh.Suite(), H, key, sH, encShare.PubVerShare) == nil {
-			if _, ok := rh.evalCommit[idx]; !ok {
-				rh.evalCommit[idx] = make([]*share.PubShare, 0)
+			src := encShare.Source
+			tgt := encShare.Target
+			if _, ok := rh.records[src]; !ok {
+				rh.records[src] = make(map[int]*Record)
 			}
-			if _, ok := rh.secret[idx]; !ok {
-				rh.secret[idx] = make([]int, 0)
+			r := &Record{
+				Key:      key,
+				Eval:     sH,
+				EncShare: encShare.PubVerShare,
+				DecShare: nil,
 			}
-			rh.evalCommit[idx] = append(rh.evalCommit[idx], sH)
-			rh.secret[idx] = append(rh.secret[idx], encShare.Target)
+			rh.records[src][tgt] = r
 		}
 	}
 
@@ -634,9 +640,9 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 	for i, group := range rh.groups {
 		var secret []int
 		for _, server := range group.server {
-			j := server.RosterIndex
-			if share, ok := rh.secret[j]; ok && group.threshold <= len(share) {
-				secret = append(secret, j)
+			src := server.RosterIndex
+			if shares, ok := rh.records[src]; ok && group.threshold <= len(shares) {
+				secret = append(secret, src)
 			}
 		}
 		if group.threshold <= len(secret) {
@@ -646,9 +652,6 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 
 	// Proceed, if there are enough good secrets
 	if len(goodSecret) == len(rh.groups) {
-
-		// Reset secret for the next phase (see handleR2)
-		rh.secret = make(map[int][]int)
 
 		for i, group := range rh.groups {
 			// Randomly remove some secrets so that a threshold of secrets remain
@@ -664,7 +667,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 			log.Lvlf3("Group: %v %v", i, group.index)
 		}
 
-		log.Lvlf1("ChosenSecret: %v", rh.chosenSecret)
+		log.Lvlf3("ChosenSecret: %v", rh.chosenSecret)
 
 		// Transformation of commitments from map[int][]int to []uint32 to avoid protobuf errors
 		var chosenSecret = make([]uint32, 0)
@@ -676,26 +679,31 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 
 		// Prepare a message for each server of a group and send it
 		for i, group := range rh.groups {
-			for j, server := range group.server {
+			for _, server := range group.server {
 
 				// Among the good secrets chosen previously collect all valid
 				// shares, proofs, and polynomial commits intended for the
 				// target server
-				var encShare []*Share
-				var commit []*share.PubShare
+				var encShares []*Share
+				var evals []*share.PubShare
 				for _, k := range rh.chosenSecret[i] {
-					r1 := rh.r1s[k]
-					ec := rh.evalCommit[k]
-					encShare = append(encShare, r1.EncShare[j])
-					commit = append(commit, ec[j])
+					src := server.RosterIndex
+					r := rh.records[k][src]
+					encShare := &Share{
+						Source:      k,
+						Target:      src,
+						PubVerShare: r.EncShare,
+					}
+					encShares = append(encShares, encShare)
+					evals = append(evals, r.Eval)
 				}
 
 				i2 := &I2{
 					Sig:          []byte{0},
 					SID:          rh.sid,
 					ChosenSecret: chosenSecret,
-					EncShare:     encShare,
-					EvalCommit:   commit,
+					EncShare:     encShares,
+					EvalCommit:   evals,
 				}
 
 				if err := signSchnorr(rh.Suite(), rh.Private(), i2); err != nil {
@@ -784,26 +792,40 @@ func (rh *RandHound) handleR2(r2 WR2) error {
 	G := rh.Suite().Point().Base()
 	for _, share := range msg.DecShare {
 		src := share.Source
-		X := rh.groups[grp].key[pos]
-		encShare := rh.r1s[src].EncShare[pos].PubVerShare
+		tgt := share.Target
+		if _, ok := rh.records[src][tgt]; !ok {
+			continue
+		}
+		r := rh.records[src][tgt]
+		X := r.Key             //rh.groups[grp].key[pos]
+		encShare := r.EncShare //rh.r1s[src].EncShare[pos].PubVerShare
 		decShare := share.PubVerShare
 		if pvss.VerifyDecShare(rh.Suite(), G, X, encShare, decShare) == nil {
-			if _, ok := rh.records[src]; !ok {
-				rh.records[src] = make([]*Record, 0)
-			}
-			r := &Record{
-				Key:      X,
-				EncShare: encShare,
-				DecShare: decShare,
-			}
-			rh.records[src] = append(rh.records[src], r)
+			//if _, ok := rh.records[src]; !ok {
+			//	rh.records[src] = make(map[int]*Record)
+			//}
+			r.DecShare = decShare
+			rh.records[src][tgt] = r // XXX: update
+
+			//r := &Record{
+			//	Key:      X,
+			//	EncShare: encShare,
+			//	DecShare: decShare,
+			//}
+			//rh.records[src] = append(rh.records[src], r)
 		}
 	}
 
 	proceed := true
 	for i, group := range rh.chosenSecret {
-		for _, server := range group {
-			if len(rh.records[server]) < rh.groups[i].threshold {
+		for _, src := range group {
+			c := 0 // enough shares?
+			for _, r := range rh.records[src] {
+				if r.Key != nil && r.EncShare != nil && r.DecShare != nil {
+					c += 1
+				}
+			}
+			if c < rh.groups[i].threshold {
 				proceed = false
 			}
 		}
