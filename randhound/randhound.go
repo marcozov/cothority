@@ -337,11 +337,8 @@ func (rh *RandHound) Verify(suite abstract.Suite, random []byte, t *Transcript) 
 	G := suite.Point().Base()
 	H, _ := suite.Point().Pick(nil, suite.Cipher(t.SID))
 	rnd := suite.Point().Null()
-	_ = rnd
 	for i, group := range t.ChosenSecrets {
-		_ = i
 		for _, src := range group {
-
 			var X []abstract.Point
 			var encShares []*pvss.PubVerShare
 			var decShares []*pvss.PubVerShare
@@ -391,7 +388,7 @@ func (rh *RandHound) Verify(suite abstract.Suite, random []byte, t *Transcript) 
 	}
 
 	if !bytes.Equal(random, rb) {
-		return errors.New("Bad randomness")
+		return errors.New("bad randomness")
 	}
 
 	return nil
@@ -613,8 +610,9 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 	H, _ := rh.Suite().Point().Pick(nil, rh.Suite().Cipher(rh.sid))
 	pubPoly := share.NewPubPoly(rh.Suite(), H, msg.Commit)
 	for _, encShare := range msg.EncShare {
-		sH := pubPoly.Eval(encShare.PubVerShare.S.I)
-		key := rh.TreeNodeInstance.Roster().Get(encShare.Target).Public
+		i := encShare.PubVerShare.S.I
+		sH := pubPoly.Eval(i)
+		key := rh.groups[grp].key[i]
 		if pvss.VerifyEncShare(rh.Suite(), H, key, sH, encShare.PubVerShare) == nil {
 			if _, ok := rh.evalCommit[idx]; !ok {
 				rh.evalCommit[idx] = make([]*share.PubShare, 0)
