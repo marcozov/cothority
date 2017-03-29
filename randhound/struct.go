@@ -31,23 +31,27 @@ type RandHound struct {
 	*onet.TreeNodeInstance                         // ...
 	mutex                  sync.Mutex              // ...
 	nodes                  int                     // Total number of nodes (client + servers)
+	groups                 int                     // Number of groups
 	purpose                string                  // Purpose of protocol run
 	time                   time.Time               // Timestamp of initiation
 	seed                   []byte                  // Client-chosen seed for sharding
 	sid                    []byte                  // Session identifier
-	groups                 []*Group                // Group information
+	servers                [][]*onet.TreeNode      // Grouped servers
+	keys                   [][]abstract.Point      // Grouped keys
+	indices                [][]int                 // Grouped indices
+	thresholds             []int                   // Groupd thresholds
 	serverIdxToGroupNum    map[int]int             // Mapping of global server index to group number
 	serverIdxToGroupIdx    map[int]int             // Mapping of global server index to group server index
+	records                map[int]map[int]*Record // Buffer for shares; format: [source][target]*Record
+	chosenSecrets          map[int][]int           // Chosen secrets contributing to collective randomness
 	i1s                    map[int]*I1             // I1 messages sent to servers (index: group)
 	i2s                    map[int]*I2             // I2 messages sent to servers (index: server)
 	i3s                    map[int]*I3             // R1 messages received from servers (index: server)
 	r1s                    map[int]*R1             // R2 messages received from servers (index: server)
 	r2s                    map[int]*R2             // TODO
 	r3s                    map[int]*R3             // TODO
-	chosenSecret           map[int][]int           // Chosen secrets contributing to collective randomness
 	Done                   chan bool               // Channel to signal the end of a protocol run
 	SecretReady            bool                    // Boolean to indicate whether the collect randomness is ready or not
-	records                map[int]map[int]*Record // [source][target]*Record TODO
 }
 
 // Record ...
@@ -56,14 +60,6 @@ type Record struct {
 	Eval     *share.PubShare   // ...
 	EncShare *pvss.PubVerShare // ...
 	DecShare *pvss.PubVerShare // ...
-}
-
-// Group ...
-type Group struct {
-	server    []*onet.TreeNode // List of servers
-	key       []abstract.Point // Public keys of the servers
-	index     []int            // Roster indices of servers
-	threshold int              // Secret sharding threshold
 }
 
 // Share contains information on public verifiable shares and the source and
@@ -102,26 +98,26 @@ type I1 struct {
 
 // R1 is the reply sent by the servers to the client in step 2.
 type R1 struct {
-	Sig      []byte           // Schnorr signature
-	HI1      []byte           // Hash of I1
-	EncShare []*Share         // Encrypted shares
-	Commit   []abstract.Point // Commitments to polynomial coefficients
+	Sig       []byte           // Schnorr signature
+	HI1       []byte           // Hash of I1
+	EncShares []*Share         // Encrypted shares
+	Commit    []abstract.Point // Commitments to polynomial coefficients
 }
 
 // I2 is the message sent by the client to the servers in step 3.
 type I2 struct {
-	Sig          []byte            // Schnorr signature
-	SID          []byte            // Session identifier
-	ChosenSecret []uint32          // Chosen secrets (flattened)
-	EncShare     []*Share          // Encrypted shares
-	EvalCommit   []*share.PubShare // Commitments of polynomial evaluations
+	Sig           []byte            // Schnorr signature
+	SID           []byte            // Session identifier
+	ChosenSecrets []uint32          // Chosen secrets (flattened)
+	EncShares     []*Share          // Encrypted shares
+	Evals         []*share.PubShare // Commitments of polynomial evaluations
 }
 
 // R2 is the reply sent by the servers to the client in step 4.
 type R2 struct {
-	Sig      []byte   // Schnorr signature
-	HI2      []byte   // Hash of I2
-	DecShare []*Share // Decrypted shares
+	Sig       []byte   // Schnorr signature
+	HI2       []byte   // Hash of I2
+	DecShares []*Share // Decrypted shares
 }
 
 // I3 is the message sent by the client to the servers in step 5.
