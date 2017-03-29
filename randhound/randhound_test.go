@@ -44,16 +44,25 @@ func TestRandHound(test *testing.T) {
 		}
 		log.Lvlf1("RandHound - collective randomness: ok")
 
+		foo := make(map[int]map[int]int)
+
+		bar := make(map[int]int)
+
+		foo[1] = bar
+		foo[1][2] = 3
+
+		log.Lvl1(foo)
+
 		_ = random
 		_ = transcript
 
 		log.Lvlf1("RandHound - collective randomness: %v", random)
 
-		//err = rh.Verify(rh.Suite(), random, transcript)
-		//if err != nil {
-		//	test.Fatal(err)
-		//}
-		//log.Lvlf1("RandHound - verification: ok")
+		err = rh.Verify(rh.Suite(), random, transcript)
+		if err != nil {
+			test.Fatal(err)
+		}
+		log.Lvlf1("RandHound - verification: ok")
 
 	case <-time.After(time.Second * time.Duration(nodes) * 2):
 		test.Fatal("RandHound – time out")

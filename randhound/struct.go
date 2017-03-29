@@ -77,6 +77,20 @@ type Share struct {
 
 // Transcript represents the record of a protocol run created by the client.
 type Transcript struct {
+	SID           []byte             // Session identifier
+	Nodes         int                // Total number of nodes (client + server)
+	Purpose       string             // Purpose of protocol run
+	Time          time.Time          // Timestamp of initiation
+	Seed          []byte             // Client-chosen seed for sharding
+	Client        abstract.Point     // Client public key
+	Groups        [][]int            // Grouped server indices
+	Keys          [][]abstract.Point // Grouped server public keys
+	Thresholds    []int              // Grouped secret sharing thresholds
+	ChosenSecrets map[int][]int      // Chosen secrets that contribute to collective randomness
+	I1s           map[int]*I1        // I1 messages sent to servers
+	I2s           map[int]*I2        // I2 messages sent to servers
+	R1s           map[int]*R1        // R1 messages received from servers
+	R2s           map[int]*R2        // R2 messages received from servers
 }
 
 // I1 is the message sent by the client to the servers in step 1.

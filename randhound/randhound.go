@@ -98,8 +98,16 @@ func (rh *RandHound) Start() error {
 		}
 	}
 
+	// Prepare transcript (TODO: fix)
+	groupss := make([][]int, len(rh.groups))
+	keyss := make([][]abstract.Point, len(rh.groups))
+	for i, g := range rh.groups {
+		groupss[i] = g.index
+		keyss[i] = g.key
+	}
+
 	// Compute session identifier
-	rh.sid, err = rh.sessionID(rh.Public(), rh.groups, rh.purpose, rh.time) // TODO: probably needs to change for verification later
+	rh.sid, err = rh.sessionID(rh.Public(), keyss, groupss, rh.purpose, rh.time) // TODO: probably needs to change for verification later
 	if err != nil {
 		return err
 	}
@@ -184,7 +192,6 @@ func (rh *RandHound) Random() ([]byte, *Transcript, error) {
 			decShares = append(decShares, r[i].DecShare)
 		}
 		ps, err := pvss.RecoverSecret(rh.Suite(), G, X, encShares, decShares, rh.groups[grp].threshold, len(rh.groups[grp].server))
-		log.Lvl1(ps, src)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -199,15 +206,198 @@ func (rh *RandHound) Random() ([]byte, *Transcript, error) {
 		return nil, nil, err
 	}
 
-	return rb, nil, nil
+	// Prepare transcript
+	groups := make([][]int, len(rh.groups))
+	thresholds := make([]int, len(rh.groups))
+	keys := make([][]abstract.Point, len(rh.groups))
+	for i, g := range rh.groups {
+		thresholds[i] = g.threshold
+		groups[i] = g.index
+		keys[i] = g.key
+	}
+
+	transcript := &Transcript{
+		SID:           rh.sid,
+		Nodes:         rh.nodes,
+		Purpose:       rh.purpose,
+		Time:          rh.time,
+		Seed:          rh.seed,
+		Client:        rh.Public(),
+		Groups:        groups,
+		Keys:          keys,
+		Thresholds:    thresholds,
+		ChosenSecrets: rh.chosenSecret,
+		I1s:           rh.i1s,
+		I2s:           rh.i2s,
+		R1s:           rh.r1s,
+		R2s:           rh.r2s,
+	}
+
+	return rb, transcript, nil
 }
 
 // Verify checks a given collective random string against its protocol transcript.
-func (rh *RandHound) Verify() error {
+func (rh *RandHound) Verify(suite abstract.Suite, random []byte, t *Transcript) error {
+
+	rh.mutex.Lock()
+	defer rh.mutex.Unlock()
+
+	sid, err := rh.sessionID(t.Client, t.Keys, t.Groups, t.Purpose, t.Time)
+	if err != nil {
+		return err
+	}
+
+	if !bytes.Equal(t.SID, sid) {
+		return fmt.Errorf("Wrong session identifier")
+	}
+
+	// Verify I1 signatures
+	for _, i1 := range t.I1s {
+		if err := verifySchnorr(suite, t.Client, i1); err != nil {
+			return err
+		}
+	}
+
+	// Verify R1 signatures
+	for src, r1 := range t.R1s {
+		var key abstract.Point
+		for i := range t.Groups {
+			for j := range t.Groups[i] {
+				if src == t.Groups[i][j] {
+					key = t.Keys[i][j]
+				}
+			}
+		}
+		if err := verifySchnorr(suite, key, r1); err != nil {
+			return err
+		}
+	}
+
+	// Verify I2 signatures
+	for _, i2 := range t.I2s {
+		if err := verifySchnorr(suite, t.Client, i2); err != nil {
+			return err
+		}
+	}
+
+	// Verify R2 signatures
+	for src, r2 := range t.R2s {
+		var key abstract.Point
+		for i := range t.Groups {
+			for j := range t.Groups[i] {
+				if src == t.Groups[i][j] {
+					key = t.Keys[i][j]
+				}
+			}
+		}
+		if err := verifySchnorr(suite, key, r2); err != nil {
+			return err
+		}
+	}
+
+	// Verify message hashes HI1 and HI2; it is okay if some messages are
+	// missing as long as there are enough to reconstruct the chosen secrets
+	for i, msg := range t.I1s {
+		for _, j := range t.Groups[i] {
+			if _, ok := t.R1s[j]; ok {
+				if err := verifyMessage(suite, msg, t.R1s[j].HI1); err != nil {
+					return err
+				}
+			} else {
+				log.Lvlf2("Couldn't find R1 message of server %v", j)
+			}
+		}
+	}
+
+	for i, msg := range t.I2s {
+		if _, ok := t.R2s[i]; ok {
+			if err := verifyMessage(suite, msg, t.R2s[i].HI2); err != nil {
+				return err
+			}
+		} else {
+			log.Lvlf2("Couldn't find R2 message of server %v", i)
+		}
+	}
+
+	// Verify that all servers received the same client commitment
+	for server, msg := range t.I2s {
+		c := 0
+		// Deterministically iterate over map[int][]int
+		for i := 0; i < len(t.ChosenSecrets); i++ {
+			for _, cs := range t.ChosenSecrets[i] {
+				if int(msg.ChosenSecret[c]) != cs {
+					return fmt.Errorf("Server %v received wrong client commitment", server)
+				}
+				c++
+			}
+		}
+	}
+
+	// Recover and verify the randomness
+	G := suite.Point().Base()
+	H, _ := suite.Point().Pick(nil, suite.Cipher(t.SID))
+	rnd := suite.Point().Null()
+	_ = rnd
+	for i, group := range t.ChosenSecrets {
+		_ = i
+		for _, src := range group {
+
+			var X []abstract.Point
+			var encShares []*pvss.PubVerShare
+			var decShares []*pvss.PubVerShare
+
+			// All R1 messages of the chosen secrets should be there
+			if _, ok := t.R1s[src]; !ok {
+				return errors.New("R1 message not found")
+			}
+			r1 := t.R1s[src]
+
+			// Check availability of corresponding R2 messages, skip if not there
+			for _, encShare := range r1.EncShare {
+				target := encShare.Target
+				if _, ok := t.R2s[target]; !ok {
+					continue
+				}
+
+				pubPoly := share.NewPubPoly(rh.Suite(), H, r1.Commit)
+				key := t.Keys[i][encShare.PubVerShare.S.I] // TODO: check if there is a better way
+
+				r2 := t.R2s[target]
+				for _, decShare := range r2.DecShare {
+					if decShare.Source == src {
+
+						if pvss.VerifyEncSharePoly(suite, H, key, pubPoly, encShare.PubVerShare) == nil {
+							if pvss.VerifyDecShare(suite, G, key, encShare.PubVerShare, decShare.PubVerShare) == nil {
+								X = append(X, key)
+								encShares = append(encShares, encShare.PubVerShare)
+								decShares = append(decShares, decShare.PubVerShare)
+							}
+						}
+					}
+				}
+			}
+
+			ps, err := pvss.RecoverSecret(rh.Suite(), G, X, encShares, decShares, t.Thresholds[i], len(t.Groups[i]))
+			if err != nil {
+				return err
+			}
+			rnd = rh.Suite().Point().Add(rnd, ps)
+		}
+	}
+
+	rb, err := rnd.MarshalBinary()
+	if err != nil {
+		return err
+	}
+
+	if !bytes.Equal(random, rb) {
+		return errors.New("Bad randomness")
+	}
+
 	return nil
 }
 
-func (rh *RandHound) sessionID(clientKey abstract.Point, groups []*Group, purpose string, time time.Time) ([]byte, error) {
+func (rh *RandHound) sessionID(clientKey abstract.Point, keys [][]abstract.Point, groups [][]int, purpose string, time time.Time) ([]byte, error) {
 
 	keyBuf := new(bytes.Buffer)
 	idxBuf := new(bytes.Buffer)
@@ -222,17 +412,17 @@ func (rh *RandHound) sessionID(clientKey abstract.Point, groups []*Group, purpos
 		return nil, err
 	}
 
-	// Process server keys and indices
-	for _, grp := range groups {
-		for _, server := range grp.server {
-			sb, err := server.ServerIdentity.Public.MarshalBinary()
+	// Process server keys and group indices
+	for i, _ := range keys {
+		for j, _ := range keys[i] {
+			kb, err := keys[i][j].MarshalBinary()
 			if err != nil {
 				return nil, err
 			}
-			if _, err := keyBuf.Write(sb); err != nil {
+			if _, err := keyBuf.Write(kb); err != nil {
 				return nil, err
 			}
-			if err := binary.Write(idxBuf, binary.LittleEndian, uint32(server.RosterIndex)); err != nil {
+			if err := binary.Write(idxBuf, binary.LittleEndian, uint32(groups[i][j])); err != nil {
 				return nil, err
 			}
 		}
