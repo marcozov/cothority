@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/dedis/crypto/share/pvss"
 	"github.com/dedis/crypto/sign"
 	"github.com/dedis/onet"
-	"github.com/dedis/onet/crypto"
 	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
 )
@@ -421,17 +419,7 @@ func (rh *RandHound) sessionID(clientKey abstract.Point, keys [][]abstract.Point
 		return nil, err
 	}
 
-	hash := rh.Suite().Hash()
-	if _, err := io.Copy(hash, keyBuf); err != nil {
-		return nil, err
-	}
-	if _, err := io.Copy(hash, idxBuf); err != nil {
-		return nil, err
-	}
-	if _, err := io.Copy(hash, miscBuf); err != nil {
-		return nil, err
-	}
-	return hash.Sum(nil), nil
+	return hash.Bytes(rh.Suite().Hash(), keyBuf.Bytes(), idxBuf.Bytes(), miscBuf.Bytes())
 }
 
 func signSchnorr(suite abstract.Suite, key abstract.Scalar, m interface{}) error {
@@ -709,7 +697,7 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 		return err
 	}
 
-	hi2, err := crypto.HashBytes(rh.Suite().Hash(), i2b)
+	hi2, err := hash.Bytes(rh.Suite().Hash(), i2b)
 	if err != nil {
 		return err
 	}
