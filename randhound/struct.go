@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/dedis/crypto/abstract"
-	"github.com/dedis/crypto/share"
 	"github.com/dedis/crypto/share/pvss"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/network"
@@ -57,7 +56,7 @@ type RandHound struct {
 // Record ...
 type Record struct {
 	Key      abstract.Point    // Public server key
-	Eval     *share.PubShare   // Public commitment share of the commitment polynomial
+	Eval     abstract.Point    // Commitment of polynomial evaluation
 	EncShare *pvss.PubVerShare // Encrypted verifiable share
 	DecShare *pvss.PubVerShare // Decrypted verifiable share
 }
@@ -106,11 +105,11 @@ type R1 struct {
 
 // I2 is the message sent by the client to the servers in step 3.
 type I2 struct {
-	Sig           []byte            // Schnorr signature
-	SID           []byte            // Session identifier
-	ChosenSecrets []uint32          // Chosen secrets (flattened)
-	EncShares     []*Share          // Encrypted shares
-	Evals         []*share.PubShare // Commitments of polynomial evaluations
+	Sig           []byte           // Schnorr signature
+	SID           []byte           // Session identifier
+	ChosenSecrets []uint32         // Chosen secrets (flattened)
+	EncShares     []*Share         // Encrypted shares
+	Evals         []abstract.Point // Commitments of polynomial evaluations
 }
 
 // R2 is the reply sent by the servers to the client in step 4.

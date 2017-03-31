@@ -336,13 +336,13 @@ func (rh *RandHound) Verify(suite abstract.Suite, random []byte, t *Transcript) 
 				}
 
 				pubPoly := share.NewPubPoly(rh.Suite(), H, r1.Commit)
-				key := t.Keys[i][encShare.PubVerShare.S.I] // TODO: check if there is a better way
-
+				pos := encShare.PubVerShare.S.I
+				key := t.Keys[i][pos]
+				sH := pubPoly.Eval(pos).V
 				r2 := t.R2s[target]
 				for _, decShare := range r2.DecShares {
 					if decShare.Source == src {
-
-						if pvss.VerifyEncSharePoly(suite, H, key, pubPoly, encShare.PubVerShare) == nil {
+						if pvss.VerifyEncShare(suite, H, key, sH, encShare.PubVerShare) == nil {
 							if pvss.VerifyDecShare(suite, G, key, encShare.PubVerShare, decShare.PubVerShare) == nil {
 								X = append(X, key)
 								encShares = append(encShares, encShare.PubVerShare)
@@ -423,7 +423,6 @@ func (rh *RandHound) sessionID(clientKey abstract.Point, keys [][]abstract.Point
 }
 
 func signSchnorr(suite abstract.Suite, key abstract.Scalar, m interface{}) error {
-
 	// Reset signature field
 	reflect.ValueOf(m).Elem().FieldByName("Sig").SetBytes([]byte{0}) // XXX: hack
 
@@ -446,7 +445,6 @@ func signSchnorr(suite abstract.Suite, key abstract.Scalar, m interface{}) error
 }
 
 func verifySchnorr(suite abstract.Suite, key abstract.Point, m interface{}) error {
-
 	// Make a copy of the signature
 	sig := reflect.ValueOf(m).Elem().FieldByName("Sig").Bytes()
 
@@ -466,7 +464,6 @@ func verifySchnorr(suite abstract.Suite, key abstract.Point, m interface{}) erro
 }
 
 func verifyMessage(suite abstract.Suite, m interface{}, hash1 []byte) error {
-
 	// Make a copy of the signature
 	sig := reflect.ValueOf(m).Elem().FieldByName("Sig").Bytes()
 
@@ -579,9 +576,9 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 	H, _ := rh.Suite().Point().Pick(nil, rh.Suite().Cipher(rh.sid))
 	pubPoly := share.NewPubPoly(rh.Suite(), H, msg.Commit)
 	for _, encShare := range msg.EncShares {
-		i := encShare.PubVerShare.S.I
-		sH := pubPoly.Eval(i)
-		key := rh.keys[grp][i] //groups[grp].key[i]
+		pos := encShare.PubVerShare.S.I
+		sH := pubPoly.Eval(pos).V
+		key := rh.keys[grp][pos]
 		if pvss.VerifyEncShare(rh.Suite(), H, key, sH, encShare.PubVerShare) == nil {
 			src := encShare.Source
 			tgt := encShare.Target
@@ -646,12 +643,11 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 		// Prepare a message for each server of a group and send it
 		for i, servers := range rh.servers {
 			for _, server := range servers {
-
 				// Among the good secrets chosen previously collect all valid
 				// shares, proofs, and polynomial commits intended for the
 				// target server
 				var encShares []*Share
-				var evals []*share.PubShare
+				var evals []abstract.Point
 				for _, k := range rh.chosenSecrets[i] {
 					src := server.RosterIndex
 					r := rh.records[k][src]
@@ -663,7 +659,6 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 					encShares = append(encShares, encShare)
 					evals = append(evals, r.Eval)
 				}
-
 				i2 := &I2{
 					Sig:           []byte{0},
 					SID:           rh.sid,
@@ -671,13 +666,10 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 					EncShares:     encShares,
 					Evals:         evals,
 				}
-
 				if err := signSchnorr(rh.Suite(), rh.Private(), i2); err != nil {
 					return err
 				}
-
 				rh.i2s[server.RosterIndex] = i2
-
 				if err := rh.SendTo(server, i2); err != nil {
 					return err
 				}
