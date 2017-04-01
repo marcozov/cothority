@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/dedis/crypto/abstract"
+	"github.com/dedis/crypto/cosi"
 	"github.com/dedis/crypto/share/pvss"
 	"github.com/dedis/onet"
 	"github.com/dedis/onet/network"
@@ -32,6 +33,7 @@ type RandHound struct {
 	mutex                  sync.Mutex // An awesome mutex!
 	Done                   chan bool  // Channel to signal the end of a protocol run
 	SecretReady            bool       // Boolean to indicate whether the collect randomness is ready or not
+	CoSi                   *cosi.CoSi // Collective signing instance
 
 	// Session information (client and server)
 	nodes               int                // Total number of nodes (client + servers)
@@ -58,10 +60,8 @@ type RandHound struct {
 	r2s           map[int]*R2             // R2 messages received from servers (index: server)
 	r3s           map[int]*R3             // R3 messages received from servers (index: server)
 
-	v abstract.Scalar // Server secret commitment (required for signing the chosen secrets)
-	V abstract.Point  // Aggregate commit
-	e []int           // Participating servers
-	c []byte          // Challenge
+	msg []byte // Message to be signed
+	e   []int  // Participating servers
 
 }
 
@@ -130,7 +130,7 @@ type I2 struct {
 	ChosenSecrets []uint32         // Chosen secrets (flattened)
 	EncShares     []*Share         // Encrypted shares
 	Evals         []abstract.Point // Commitments of polynomial evaluations
-	C             []byte           // Challenge used to sign chosen secrets
+	C             abstract.Scalar  // Challenge used to sign chosen secrets
 }
 
 // R2 is the reply sent by the servers to the client in step 4.

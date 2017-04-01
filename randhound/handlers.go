@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/dedis/crypto/abstract"
+	"github.com/dedis/crypto/cosi"
 	"github.com/dedis/crypto/hash"
 	"github.com/dedis/crypto/random"
 	"github.com/dedis/crypto/share"
@@ -38,7 +39,7 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 	rh.seed = msg.Seed
 
 	// Setup remaining session information
-	if err := rh.setupSession(); err != nil {
+	if err := rh.session(); err != nil {
 		return err
 	}
 
@@ -46,6 +47,9 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 	if !bytes.Equal(rh.sid, msg.SID) {
 		return errorWrongSession
 	}
+
+	// Setup CoSi instance
+	rh.CoSi = cosi.NewCosi(rh.Suite(), rh.Private(), rh.Roster().Publics())
 
 	// Compute hash of the client's message
 	msg.Sig = []byte{0} // XXX: hack
@@ -81,13 +85,12 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 
 	// Setup R1 message
 	_, commits := pubPoly.Info()
-	rh.v = rh.Suite().Scalar().Pick(random.Stream)
 	r1 := &R1{
 		SID:       rh.sid,
 		HI1:       hi1,
 		EncShares: shares,
 		Commit:    commits,
-		V:         rh.Suite().Point().Mul(nil, rh.v),
+		V:         rh.CoSi.CreateCommitment(random.Stream),
 	}
 
 	// Sign R1 message
@@ -176,7 +179,6 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 	// Proceed, if there are enough good secrets and more than 2/3 of servers replied
 	if len(goodSecrets) == rh.groups && 2*rh.nodes/3 < len(rh.r1s) {
 
-		buf := new(bytes.Buffer)
 		chosenSecrets := make([]uint32, 0)
 		for i, _ := range rh.servers {
 			// Randomly remove some secrets so that a threshold of secrets remain
@@ -191,7 +193,6 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 			// TODO: take care of the mess between chosenSecrets and rh.chosenSecrets!
 			for j := 0; j < len(secrets); j++ {
 				chosenSecrets = append(chosenSecrets, uint32(secrets[j]))
-				binary.Write(buf, binary.LittleEndian, secrets[j])
 			}
 			rh.chosenSecrets[i] = secrets
 			//log.Lvlf1("Group: %v %v %v", i, rh.thresholds[i], rh.indices[i])
@@ -199,25 +200,40 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 
 		log.Lvlf1("ChosenSecrets: %v", rh.chosenSecrets)
 
-		rh.V = rh.Suite().Point().Null()
-		rh.e = make([]int, 0)
+		// Clear CoSi mask
+		for i := 0; i < rh.nodes; i++ {
+			rh.CoSi.SetMaskBit(i, false)
+		}
 
-		// Compute aggregate commit and mark nodes that participated
+		// Set our own masking bit
+		rh.CoSi.SetMaskBit(rh.TreeNode().RosterIndex, true)
+
+		// Collect commits and mark participating nodes
+		rh.e = make([]int, 0)
+		subComms := make([]abstract.Point, 0)
 		for i, msg := range rh.r1s {
-			rh.V.Add(rh.V, msg.V)
+			subComms = append(subComms, msg.V)
+			rh.CoSi.SetMaskBit(i, true)
 			rh.e = append(rh.e, i)
 		}
-		vb, err := rh.V.MarshalBinary()
-		if err != nil {
-			return err
-		}
 
-		// Compute challenge
-		c, err := hash.Bytes(rh.Suite().Hash(), vb, rh.sid, buf.Bytes())
-		if err != nil {
+		// Compute aggregate commit
+		rh.CoSi.Commit(random.Stream, subComms)
+
+		// Compute message: msg = SID || chosen secrets
+		buf := new(bytes.Buffer)
+		if _, err := buf.Write(rh.sid); err != nil {
 			return err
 		}
-		rh.c = c
+		for _, cs := range chosenSecrets {
+			binary.Write(buf, binary.LittleEndian, cs)
+		}
+		rh.msg = buf.Bytes()
+
+		// Compute CoSi challenge
+		if _, err := rh.CoSi.CreateChallenge(rh.msg); err != nil {
+			return err
+		}
 
 		// Prepare a message for each server of a group and send it
 		for i, servers := range rh.servers {
@@ -244,7 +260,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 					ChosenSecrets: chosenSecrets,
 					EncShares:     encShares,
 					Evals:         evals,
-					C:             rh.c,
+					C:             rh.CoSi.GetChallenge(),
 				}
 				if err := signSchnorr(rh.Suite(), rh.Private(), i2); err != nil {
 					return err
@@ -311,10 +327,16 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 		return fmt.Errorf("not enough chosen secrets")
 	}
 
+	rh.CoSi.Challenge(msg.C)
+	r, err := rh.CoSi.CreateResponse()
+	if err != nil {
+		return err
+	}
+
 	// Compute the response r = v - cx
-	c := rh.Suite().Scalar().SetBytes(msg.C)
-	cx := rh.Suite().Scalar().Mul(c, rh.Private())
-	r := rh.Suite().Scalar().Sub(rh.v, cx)
+	//c := rh.Suite().Scalar().SetBytes(msg.C)
+	//cx := rh.Suite().Scalar().Mul(c, rh.Private())
+	//r := rh.Suite().Scalar().Sub(rh.v, cx)
 
 	// Setup R2 message
 	r2 := &R2{
@@ -328,17 +350,48 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 		return err
 	}
 
-	// Send R2 message back to the client
-	return nil
-	//return rh.SendTo(rh.Root(), r2)
+	return rh.SendTo(rh.Root(), r2)
 }
 
 func (rh *RandHound) handleR2(r2 WR2) error {
 	msg := &r2.R2
+	src := r2.RosterIndex
+	grp := rh.rosterIdxToGroupNum[src]
+	pos := rh.rosterIdxToGroupPos[src]
+	rh.mutex.Lock()
+	defer rh.mutex.Unlock()
+
+	// Verify R2 message signature
+	if err := verifySchnorr(rh.Suite(), rh.keys[grp][pos], msg); err != nil {
+		return err
+	}
 
 	// Verify session identifier
 	if !bytes.Equal(rh.sid, msg.SID) {
 		return errorWrongSession
+	}
+
+	// Verify that server replied to the correct I2 message
+	if err := verifyMessage(rh.Suite(), rh.i2s[src], msg.HI2); err != nil {
+		return err
+	}
+
+	// Record R2 message
+	rh.r2s[src] = msg
+
+	// TODO: Check condition to proceed
+	if len(rh.r2s) == rh.nodes-1 {
+		responses := make([]abstract.Scalar, 0)
+		for _, src := range rh.e {
+			responses = append(responses, rh.r2s[src].R)
+		}
+		if _, err := rh.CoSi.Response(responses); err != nil {
+			return err
+		}
+		sig := rh.CoSi.Signature()
+		if err := cosi.VerifySignature(rh.Suite(), rh.Roster().Publics(), rh.msg, sig); err != nil {
+			return err
+		}
 	}
 
 	return nil
