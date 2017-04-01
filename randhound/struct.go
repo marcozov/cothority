@@ -28,41 +28,44 @@ func init() {
 // RandHound is the main protocol struct and implements the
 // onet.ProtocolInstance interface.
 type RandHound struct {
+
 	// General
 	*onet.TreeNodeInstance            // The tree node instance of the client / server
+	*Session                          // Session information
 	mutex                  sync.Mutex // An awesome mutex!
 	Done                   chan bool  // Channel to signal the end of a protocol run
 	SecretReady            bool       // Boolean to indicate whether the collect randomness is ready or not
-	CoSi                   *cosi.CoSi // Collective signing instance
 
-	// Session information (client and server)
-	nodes               int                // Total number of nodes (client + servers)
-	groups              int                // Number of groups
-	purpose             string             // Purpose of protocol run
-	client              abstract.Point     // Client public key
-	time                time.Time          // Timestamp of protocol initiation
-	seed                []byte             // Client-chosen seed for sharding
-	sid                 []byte             // Session identifier
-	servers             [][]*onet.TreeNode // Grouped servers
-	keys                [][]abstract.Point // Grouped server keys
-	indices             [][]int            // Grouped server indices
-	thresholds          []int              // Grouped thresholds
-	rosterIdxToGroupNum map[int]int        // Mapping of roster server index to group number
-	rosterIdxToGroupPos map[int]int        // Mapping of roster server index to position in the group
-
-	// Message stuff (client only)
+	// Message records (TODO: check which ones are really needed)
 	records       map[int]map[int]*Record // Buffer for shares; format: [source][target]*Record
 	chosenSecrets map[int][]int           // Chosen secrets contributing to collective randomness
 	i1            *I1                     // I1 message  sent to servers
 	i2s           map[int]*I2             // I2 messages sent to servers (index: server)
-	i3s           map[int]*I3             // I3 messages sent to servers (index: server)
+	i3            *I3                     // I3 messages sent to servers
 	r1s           map[int]*R1             // R1 messages received from servers (index: server)
 	r2s           map[int]*R2             // R2 messages received from servers (index: server)
 	r3s           map[int]*R3             // R3 messages received from servers (index: server)
 
-	msg []byte // Message to be signed
-	e   []int  // Participating servers
+	// Collective signing
+	CoSi      *cosi.CoSi // Collective signing instance
+	statement []byte     // Statement to be collectively signed
+	e         []int      // Participating servers
+}
 
+type Session struct {
+	nodes      int                // Total number of nodes (client + servers)
+	groups     int                // Number of groups
+	purpose    string             // Purpose of protocol run
+	time       time.Time          // Timestamp of protocol initiation
+	seed       []byte             // Client-chosen seed for sharding
+	client     abstract.Point     // Client public key
+	sid        []byte             // Session identifier
+	servers    [][]*onet.TreeNode // Grouped servers
+	keys       [][]abstract.Point // Grouped server keys
+	indices    [][]int            // Grouped server indices
+	thresholds []int              // Grouped thresholds
+	groupNum   map[int]int        // Mapping of roster server index to group number
+	groupPos   map[int]int        // Mapping of roster server index to position in the group
 }
 
 // Record ...
@@ -111,15 +114,13 @@ type I1 struct {
 	Time    time.Time // Timestamp of protocol initiation
 }
 
-//Threshold int      // Secret sharing threshold
-
 // R1 is the reply sent by the servers to the client in step 2.
 type R1 struct {
 	Sig       []byte           // Schnorr signature
 	SID       []byte           // Session identifier
 	HI1       []byte           // Hash of I1
 	EncShares []*Share         // Encrypted shares
-	Commit    []abstract.Point // Commitments to polynomial coefficients
+	Coeffs    []abstract.Point // Commitments to polynomial coefficients
 	V         abstract.Point   // Server commitment used to sign chosen secrets
 }
 
@@ -128,7 +129,7 @@ type I2 struct {
 	Sig           []byte           // Schnorr signature
 	SID           []byte           // Session identifier
 	ChosenSecrets []uint32         // Chosen secrets (flattened)
-	EncShares     []*Share         // Encrypted shares
+	EncShares     []*Share         // Encrypted PVSS shares
 	Evals         []abstract.Point // Commitments of polynomial evaluations
 	C             abstract.Scalar  // Challenge used to sign chosen secrets
 }
@@ -141,14 +142,19 @@ type R2 struct {
 	R   abstract.Scalar // Response used to sign chosen secrets
 }
 
-//DecShares []*Share // Decrypted shares
-
 // I3 is the message sent by the client to the servers in step 5.
 type I3 struct {
+	Sig   []byte // Schnorr signature
+	SID   []byte // Session identifier
+	CoSig []byte // Collective signature on chosen secrets
 }
 
 // R3 is the reply sent by the servers to the client in step 6.
 type R3 struct {
+	Sig       []byte   // Schnorr signature
+	SID       []byte   // Session identifier
+	HI3       []byte   // Hash of I3
+	DecShares []*Share // Decrypted PVSS shares
 }
 
 // WI1 is a onet-wrapper around I1.

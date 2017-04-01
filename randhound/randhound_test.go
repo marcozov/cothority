@@ -37,14 +37,14 @@ func TestRandHound(test *testing.T) {
 	case <-rh.Done:
 		log.Lvlf1("RandHound - done")
 
-		//random, transcript, err := rh.Random()
-		//if err != nil {
-		//	test.Fatal(err)
-		//}
-		//log.Lvlf1("RandHound - collective randomness: ok")
+		random, transcript, err := rh.Random()
+		if err != nil {
+			test.Fatal(err)
+		}
+		log.Lvlf1("RandHound - collective randomness: ok")
 
-		////log.Lvlf1("RandHound - collective randomness: %v", random)
-		////_ = transcript
+		log.Lvlf1("RandHound - collective randomness: %v", random)
+		_ = transcript
 
 		//err = rh.Verify(rh.Suite(), random, transcript)
 		//if err != nil {
