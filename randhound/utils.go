@@ -30,7 +30,7 @@ func (rh *RandHound) newSession(nodes int, groups int, purpose string, timestamp
 	}
 
 	// Shard servers
-	indices, err := rh.Shard(seed, nodes, groups)
+	indices, err := Shard(rh.Suite(), seed, nodes, groups)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (rh *RandHound) sessionID(clientKey abstract.Point, serverKeys [][]abstract
 	return hash.Bytes(rh.Suite().Hash(), keyBuf.Bytes(), idxBuf.Bytes(), miscBuf.Bytes())
 }
 
-func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, thresholds []int, groupNum map[int]int, indices [][]int, records map[int]map[int]*Record) ([]byte, error) {
+func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, thresholds []int, indices [][]int, records map[int]map[int]*Record) ([]byte, error) {
 	rnd := suite.Point().Null()
 	G := suite.Point().Base()
 	H, _ := suite.Point().Pick(nil, suite.Cipher(sid))
@@ -148,7 +148,15 @@ func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, 
 				}
 			}
 		}
-		grp := groupNum[src]
+		grp := 0 // find group number
+		for i, _ := range indices {
+			for j, _ := range indices[i] {
+				if src == indices[i][j] {
+					grp = i
+					break
+				}
+			}
+		}
 		ps, err := pvss.RecoverSecret(suite, G, groupKeys, encShares, decShares, thresholds[grp], len(indices[grp]))
 		if err != nil {
 			return nil, err

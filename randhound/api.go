@@ -45,7 +45,6 @@ func (rh *RandHound) Setup(nodes int, groups int, purpose string) error {
 	rh.CoSi = cosi.NewCosi(rh.Suite(), rh.Private(), rh.Roster().Publics())
 
 	rh.records = make(map[int]map[int]*Record)
-	//rh.chosenSecrets = make(map[int][]int)
 	rh.i2s = make(map[int]*I2)
 	rh.r1s = make(map[int]*R1)
 	rh.r2s = make(map[int]*R2)
@@ -88,13 +87,13 @@ func (rh *RandHound) Start() error {
 
 // Shard uses the seed to produce a pseudorandom permutation of the numbers of
 // 1,...,n-1, and to group them into s shards.
-func (rh *RandHound) Shard(seed []byte, n, s int) ([][]int, error) {
+func Shard(suite abstract.Suite, seed []byte, n, s int) ([][]int, error) {
 	if n == 0 || s == 0 || n < s {
 		return nil, fmt.Errorf("number of requested shards not supported")
 	}
 
 	// Compute a random permutation of [1,...,n-1]
-	prng := rh.Suite().Cipher(seed)
+	prng := suite.Cipher(seed)
 	m := make([]int, n-1)
 	for i := range m {
 		j := int(random.Uint64(prng) % uint64(i+1))
@@ -122,27 +121,10 @@ func (rh *RandHound) Random() ([]byte, *Transcript, error) {
 	}
 
 	// Recover randomness
-	rb, err := recoverRandomness(rh.Suite(), rh.sid, rh.Roster().Publics(), rh.thresholds, rh.groupNum, rh.indices, rh.records)
+	rb, err := recoverRandomness(rh.Suite(), rh.sid, rh.Roster().Publics(), rh.thresholds, rh.indices, rh.records)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// For efficiency only store chosen secret records in transcript
-	//chosenRecords := make(map[int]map[int]*Record)
-	//for _, src := range rh.chosenSecrets {
-	//	if _, ok := chosenRecords[int(src)]; !ok {
-	//		chosenRecords[int(src)] = make(map[int]*Record)
-	//	}
-	//	for tgt, record := range rh.records[int(src)] {
-	//		if record.Eval != nil && record.EncShare != nil && record.DecShare != nil {
-	//			chosenRecords[int(src)][tgt] = &Record{
-	//				Eval:     record.Eval,
-	//				EncShare: record.EncShare,
-	//				DecShare: record.DecShare,
-	//			}
-	//		}
-	//	}
-	//}
 
 	// Setup transcript
 	transcript := &Transcript{
@@ -167,7 +149,7 @@ func (rh *RandHound) Verify(suite abstract.Suite, random []byte, t *Transcript) 
 	defer rh.mutex.Unlock()
 
 	// Recover the sharding
-	indices, err := rh.Shard(t.Seed, t.Nodes, t.Groups)
+	indices, err := Shard(suite, t.Seed, t.Nodes, t.Groups)
 	if err != nil {
 		return err
 	}
@@ -209,8 +191,8 @@ func (rh *RandHound) Verify(suite abstract.Suite, random []byte, t *Transcript) 
 		return err
 	}
 
-	// Recover randomness (TODO: get rid of the groupNum parameter!)
-	rb, err := recoverRandomness(suite, t.SID, t.Keys, t.Thresholds, rh.groupNum, indices, t.Records)
+	// Recover randomness
+	rb, err := recoverRandomness(suite, t.SID, t.Keys, t.Thresholds, indices, t.Records)
 	if err != nil {
 		return err
 	}

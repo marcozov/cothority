@@ -170,6 +170,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 	}
 
 	// Proceed, if there are enough good secrets and more than 2/3 of servers replied
+	// TODO: maybe we want to have a timer here to give nodes chances to send their replies
 	if len(goodSecrets) == rh.groups && 2*rh.nodes/3 < len(rh.r1s) {
 
 		for i, _ := range rh.servers {
@@ -180,7 +181,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 			l := len(secrets) - rh.thresholds[i]
 			for j := 0; j < l; j++ {
 				k := int(random.Uint32(prng) % uint32(len(secrets)))
-				delete(rh.records, secrets[k]) // XXX: check that this works!!!!
+				delete(rh.records, secrets[k]) // delete not required records
 			}
 		}
 
@@ -232,8 +233,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 				var evals []abstract.Point
 				src := server.RosterIndex
 				for _, tgt := range rh.indices[i] {
-					if _, ok := rh.records[tgt][src]; ok {
-						record := rh.records[tgt][src]
+					if record, ok := rh.records[tgt][src]; ok {
 						encShare := &Share{
 							Source:      tgt, // NOTE: this swap is correct!
 							Target:      src, // NOTE: this swap is correct!
@@ -297,15 +297,16 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 	// Record chosen secrets
 	rh.chosenSecrets = msg.ChosenSecrets
 
-	// TODO: Check that the chosen secrets satisfy the thresholds
-	//for i, secrets := range rh.chosenSecrets {
-	//	if len(secrets) != len(rh.servers[i])/3+1 {
-	//		return fmt.Errorf("wrong threshold")
-	//	}
-	//}
-
-	if !(rh.nodes/3 < len(msg.ChosenSecrets)) {
-		return fmt.Errorf("not enough chosen secrets")
+	// Check that chosen secrets satisfy thresholds
+	counter := make([]int, rh.groups)
+	for _, src := range rh.chosenSecrets {
+		i := rh.groupNum[int(src)]
+		counter[i] += 1
+	}
+	for i, t := range counter {
+		if t < rh.thresholds[i] {
+			return fmt.Errorf("not enough chosen secrets for group %v", i)
+		}
 	}
 
 	rh.CoSi.Challenge(msg.C)
@@ -355,7 +356,8 @@ func (rh *RandHound) handleR2(r2 WR2) error {
 	// Record R2 message
 	rh.r2s[src] = msg
 
-	// TODO: What condition to proceed?
+	// TODO: What condition to proceed? We need at least a reply from the 2/3 of
+	// nodes that we chose earlier. Should we have a timer?
 	if len(rh.r2s) == rh.nodes-1 {
 		responses := make([]abstract.Scalar, 0)
 		for _, src := range rh.e {

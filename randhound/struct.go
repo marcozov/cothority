@@ -28,29 +28,23 @@ func init() {
 // RandHound is the main protocol struct and implements the
 // onet.ProtocolInstance interface.
 type RandHound struct {
-
-	// General
-	*onet.TreeNodeInstance            // The tree node instance of the client / server
-	*Session                          // Session information
-	mutex                  sync.Mutex // An awesome mutex!
-	Done                   chan bool  // Channel to signal the end of a protocol run
-	SecretReady            bool       // Boolean to indicate whether the collect randomness is ready or not
-
-	// Message records (TODO: check which ones are really needed)
-	records map[int]map[int]*Record // Buffer for shares; format: [source][target]*Record
-	i1      *I1                     // I1 message  sent to servers
-	i2s     map[int]*I2             // I2 messages sent to servers (index: server)
-	i3      *I3                     // I3 messages sent to servers
-	r1s     map[int]*R1             // R1 messages received from servers (index: server)
-	r2s     map[int]*R2             // R2 messages received from servers (index: server)
-	r3s     map[int]*R3             // R3 messages received from servers (index: server)
-
-	// Collective signing
-	CoSi          *cosi.CoSi // Collective signing instance
-	chosenSecrets []uint32   // Chosen secrets contributing to collective randomness
-	statement     []byte     // Statement to be collectively signed
-	CoSig         []byte     // Collective signature on statement
-	e             []int      // Participating servers
+	*onet.TreeNodeInstance                         // The tree node instance of the client / server
+	*Session                                       // Session information
+	mutex                  sync.Mutex              // An awesome mutex!
+	Done                   chan bool               // Channel to signal the end of a protocol run
+	SecretReady            bool                    // Boolean to indicate whether the collect randomness is ready or not
+	i1                     *I1                     // I1 message  sent to servers
+	i2s                    map[int]*I2             // I2 messages sent to servers (index: server)
+	i3                     *I3                     // I3 messages sent to servers
+	r1s                    map[int]*R1             // R1 messages received from servers (index: server)
+	r2s                    map[int]*R2             // R2 messages received from servers (index: server)
+	r3s                    map[int]*R3             // R3 messages received from servers (index: server)
+	CoSi                   *cosi.CoSi              // Collective signing instance
+	chosenSecrets          []uint32                // Chosen secrets contributing to collective randomness
+	records                map[int]map[int]*Record // Records with shares of chosen PVSS secrets; format: [source][target]*Record
+	statement              []byte                  // Statement to be collectively signed
+	CoSig                  []byte                  // Collective signature on statement
+	e                      []int                   // Participating servers
 }
 
 type Session struct {
