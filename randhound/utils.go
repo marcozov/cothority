@@ -10,21 +10,18 @@ import (
 	"github.com/dedis/crypto/abstract"
 	"github.com/dedis/crypto/hash"
 	"github.com/dedis/crypto/random"
+	"github.com/dedis/crypto/share/pvss"
 	"github.com/dedis/crypto/sign"
+	"github.com/dedis/onet"
 	"github.com/dedis/onet/network"
 )
 
-func (rh *RandHound) newSession(nodes int, groups int, purpose string, t time.Time, seed []byte, client abstract.Point) (*Session, error) {
+func (rh *RandHound) newSession(nodes int, groups int, purpose string, timestamp time.Time, seed []byte, clientKey abstract.Point) (*Session, error) {
 
 	var err error
 
-	indices := make([][]int, groups)
-	thresholds := make([]int, groups)
-	groupNum := make(map[int]int)
-	groupPos := make(map[int]int)
-
-	if t.IsZero() {
-		t = time.Now()
+	if timestamp.IsZero() {
+		timestamp = time.Now()
 	}
 
 	if seed == nil {
@@ -32,30 +29,34 @@ func (rh *RandHound) newSession(nodes int, groups int, purpose string, t time.Ti
 	}
 
 	// Shard servers
-	servers, err := rh.Shard(rh.List(), seed, groups)
+	indices, err := rh.Shard(seed, nodes, groups)
 	if err != nil {
 		return nil, err
 	}
 
 	// Setup group information
-	keys := make([][]abstract.Point, groups)
-	for i, servers := range servers {
-		idx := make([]int, len(servers))
-		key := make([]abstract.Point, len(servers))
-		for j, server := range servers {
-			k := server.RosterIndex
-			groupNum[k] = i
-			groupPos[k] = j
-			idx[j] = k
-			key[j] = server.ServerIdentity.Public
+	treeNodes := rh.List()
+	servers := make([][]*onet.TreeNode, groups)
+	serverKeys := make([][]abstract.Point, groups)
+	thresholds := make([]int, groups)
+	groupNum := make(map[int]int)
+	groupPos := make(map[int]int)
+	for i, group := range indices {
+		s := make([]*onet.TreeNode, len(group))
+		k := make([]abstract.Point, len(group))
+		for j, g := range group {
+			s[j] = treeNodes[g]
+			k[j] = treeNodes[g].ServerIdentity.Public
+			groupNum[g] = i
+			groupPos[g] = j
 		}
-		indices[i] = idx
-		thresholds[i] = len(servers)/3 + 1
-		keys[i] = key
+		servers[i] = s
+		serverKeys[i] = k
+		thresholds[i] = len(s)/3 + 1
 	}
 
 	// Compute session identifier
-	sid, err := rh.sessionID(client, keys, indices, purpose, t)
+	sid, err := rh.sessionID(clientKey, serverKeys, indices, purpose, timestamp)
 	if err != nil {
 		return nil, err
 	}
@@ -65,12 +66,12 @@ func (rh *RandHound) newSession(nodes int, groups int, purpose string, t time.Ti
 		nodes:      nodes,
 		groups:     groups,
 		purpose:    purpose,
-		time:       t,
+		time:       timestamp,
 		seed:       seed,
-		client:     client,
+		clientKey:  clientKey,
 		sid:        sid,
 		servers:    servers,
-		keys:       keys,
+		serverKeys: serverKeys,
 		indices:    indices,
 		thresholds: thresholds,
 		groupNum:   groupNum,
@@ -80,14 +81,14 @@ func (rh *RandHound) newSession(nodes int, groups int, purpose string, t time.Ti
 	return session, nil
 }
 
-func (rh *RandHound) sessionID(client abstract.Point, keys [][]abstract.Point, groups [][]int, purpose string, time time.Time) ([]byte, error) {
+func (rh *RandHound) sessionID(clientKey abstract.Point, serverKeys [][]abstract.Point, indices [][]int, purpose string, timestamp time.Time) ([]byte, error) {
 	// Setup some buffers
 	keyBuf := new(bytes.Buffer)
 	idxBuf := new(bytes.Buffer)
 	miscBuf := new(bytes.Buffer)
 
 	// Process client key
-	cb, err := client.MarshalBinary()
+	cb, err := clientKey.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
@@ -96,16 +97,16 @@ func (rh *RandHound) sessionID(client abstract.Point, keys [][]abstract.Point, g
 	}
 
 	// Process server keys and group indices
-	for i, _ := range keys {
-		for j, _ := range keys[i] {
-			kb, err := keys[i][j].MarshalBinary()
+	for i, _ := range serverKeys {
+		for j, _ := range serverKeys[i] {
+			kb, err := serverKeys[i][j].MarshalBinary()
 			if err != nil {
 				return nil, err
 			}
 			if _, err := keyBuf.Write(kb); err != nil {
 				return nil, err
 			}
-			if err := binary.Write(idxBuf, binary.LittleEndian, uint32(groups[i][j])); err != nil {
+			if err := binary.Write(idxBuf, binary.LittleEndian, uint32(indices[i][j])); err != nil {
 				return nil, err
 			}
 		}
@@ -117,7 +118,7 @@ func (rh *RandHound) sessionID(client abstract.Point, keys [][]abstract.Point, g
 	}
 
 	// Process time stamp
-	t, err := time.MarshalBinary()
+	t, err := timestamp.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +128,39 @@ func (rh *RandHound) sessionID(client abstract.Point, keys [][]abstract.Point, g
 	}
 
 	return hash.Bytes(rh.Suite().Hash(), keyBuf.Bytes(), idxBuf.Bytes(), miscBuf.Bytes())
+}
+
+func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, chosenSecrets []uint32, thresholds []int, groupNum map[int]int, indices [][]int, records map[int]map[int]*Record) ([]byte, error) {
+	rnd := suite.Point().Null()
+	G := suite.Point().Base()
+	H, _ := suite.Point().Pick(nil, suite.Cipher(sid))
+	for _, src := range chosenSecrets {
+		groupKeys := make([]abstract.Point, 0)
+		encShares := make([]*pvss.PubVerShare, 0)
+		decShares := make([]*pvss.PubVerShare, 0)
+		for tgt, record := range records[int(src)] {
+			if record.EncShare != nil && record.DecShare != nil {
+				if pvss.VerifyEncShare(suite, H, keys[tgt], record.Eval, record.EncShare) == nil {
+					groupKeys = append(groupKeys, keys[tgt])
+					encShares = append(encShares, record.EncShare)
+					decShares = append(decShares, record.DecShare) // NOTE: decrypted shares will be verified during recovery
+				}
+			}
+		}
+		grp := groupNum[int(src)]
+		ps, err := pvss.RecoverSecret(suite, G, groupKeys, encShares, decShares, thresholds[grp], len(indices[grp]))
+		if err != nil {
+			return nil, err
+		}
+		rnd = suite.Point().Add(rnd, ps)
+	}
+
+	rb, err := rnd.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	return rb, nil
+
 }
 
 func signSchnorr(suite abstract.Suite, key abstract.Scalar, m interface{}) error {

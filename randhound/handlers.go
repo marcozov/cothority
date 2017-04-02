@@ -59,11 +59,11 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 
 	// Compute encrypted PVSS shares for group members
 	grp := rh.groupNum[idx]
-	keys := rh.keys[grp]
+	groupKeys := rh.serverKeys[grp]
 	t := rh.thresholds[grp]
 	secret := rh.Suite().Scalar().Pick(random.Stream)
 	H, _ := rh.Suite().Point().Pick(nil, rh.Suite().Cipher(msg.SID))
-	encShares, pubPoly, err := pvss.EncShares(rh.Suite(), H, keys, secret, t)
+	encShares, pubPoly, err := pvss.EncShares(rh.Suite(), H, groupKeys, secret, t)
 	if err != nil {
 		return err
 	}
@@ -106,7 +106,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 	defer rh.mutex.Unlock()
 
 	// Verify R1 message signature
-	if err := verifySchnorr(rh.Suite(), rh.keys[grp][pos], msg); err != nil {
+	if err := verifySchnorr(rh.Suite(), rh.serverKeys[grp][pos], msg); err != nil {
 		return err
 	}
 
@@ -136,7 +136,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 	for _, encShare := range msg.EncShares {
 		pos := encShare.PubVerShare.S.I
 		sH := pubPoly.Eval(pos).V
-		key := rh.keys[grp][pos]
+		key := rh.serverKeys[grp][pos]
 		if pvss.VerifyEncShare(rh.Suite(), H, key, sH, encShare.PubVerShare) == nil {
 			src := encShare.Source
 			tgt := encShare.Target
@@ -144,7 +144,6 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 				rh.records[src] = make(map[int]*Record)
 			}
 			rh.records[src][tgt] = &Record{
-				Key:      key,
 				Eval:     sH,
 				EncShare: encShare.PubVerShare,
 				DecShare: nil,
@@ -185,7 +184,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 				k := int(random.Uint32(prng) % uint32(len(secrets)))
 				secrets = append(secrets[:k], secrets[k+1:]...)
 			}
-			// TODO: take care of the mess between chosenSecrets and rh.chosenSecrets!
+			// TODO: take care of the mess between chosenSecrets and rh.chosenSecrets and rh.chosenSecrets32!
 			for j := 0; j < len(secrets); j++ {
 				chosenSecrets = append(chosenSecrets, uint32(secrets[j]))
 			}
@@ -224,6 +223,8 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 			binary.Write(buf, binary.LittleEndian, cs)
 		}
 		rh.statement = buf.Bytes()
+
+		rh.chosenSecrets32 = chosenSecrets
 
 		// Compute CoSi challenge
 		if _, err := rh.CoSi.CreateChallenge(rh.statement); err != nil {
@@ -275,7 +276,7 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 	src := i2.RosterIndex
 
 	// Verify I2 message signature
-	if err := verifySchnorr(rh.Suite(), rh.client, msg); err != nil {
+	if err := verifySchnorr(rh.Suite(), rh.clientKey, msg); err != nil {
 		return err
 	}
 
@@ -351,7 +352,7 @@ func (rh *RandHound) handleR2(r2 WR2) error {
 	defer rh.mutex.Unlock()
 
 	// Verify R2 message signature
-	if err := verifySchnorr(rh.Suite(), rh.keys[grp][pos], msg); err != nil {
+	if err := verifySchnorr(rh.Suite(), rh.serverKeys[grp][pos], msg); err != nil {
 		return err
 	}
 
@@ -377,13 +378,13 @@ func (rh *RandHound) handleR2(r2 WR2) error {
 		if _, err := rh.CoSi.Response(responses); err != nil {
 			return err
 		}
-		cosig := rh.CoSi.Signature()
-		if err := cosi.VerifySignature(rh.Suite(), rh.Roster().Publics(), rh.statement, cosig); err != nil {
+		rh.CoSig = rh.CoSi.Signature()
+		if err := cosi.VerifySignature(rh.Suite(), rh.Roster().Publics(), rh.statement, rh.CoSig); err != nil {
 			return err
 		}
 		rh.i3 = &I3{
 			SID:   rh.sid,
-			CoSig: cosig,
+			CoSig: rh.CoSig,
 		}
 		if err := signSchnorr(rh.Suite(), rh.Private(), rh.i3); err != nil {
 			return err
@@ -400,7 +401,7 @@ func (rh *RandHound) handleI3(i3 WI3) error {
 	src := i3.RosterIndex
 
 	// Verify I3 message signature
-	if err := verifySchnorr(rh.Suite(), rh.client, msg); err != nil {
+	if err := verifySchnorr(rh.Suite(), rh.clientKey, msg); err != nil {
 		return err
 	}
 
@@ -477,7 +478,7 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 	}
 
 	// Verify R3 message signature
-	if err := verifySchnorr(rh.Suite(), rh.keys[grp][pos], msg); err != nil {
+	if err := verifySchnorr(rh.Suite(), rh.serverKeys[grp][pos], msg); err != nil {
 		return err
 	}
 
@@ -491,6 +492,7 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 
 	// Verify decrypted shares and record valid ones
 	G := rh.Suite().Point().Base()
+	K := rh.Roster().Publics()
 	for _, share := range msg.DecShares {
 		src := share.Source
 		tgt := share.Target
@@ -498,7 +500,7 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 			continue
 		}
 		r := rh.records[src][tgt]
-		X := r.Key
+		X := K[tgt]
 		encShare := r.EncShare
 		decShare := share.PubVerShare
 		if pvss.VerifyDecShare(rh.Suite(), G, X, encShare, decShare) == nil {
@@ -511,8 +513,8 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 	for i, group := range rh.chosenSecrets {
 		for _, src := range group {
 			c := 0 // enough shares?
-			for _, r := range rh.records[src] {
-				if r.Key != nil && r.EncShare != nil && r.DecShare != nil {
+			for _, record := range rh.records[src] {
+				if record.EncShare != nil && record.DecShare != nil {
 					c += 1
 				}
 			}

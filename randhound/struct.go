@@ -37,18 +37,20 @@ type RandHound struct {
 	SecretReady            bool       // Boolean to indicate whether the collect randomness is ready or not
 
 	// Message records (TODO: check which ones are really needed)
-	records       map[int]map[int]*Record // Buffer for shares; format: [source][target]*Record
-	chosenSecrets map[int][]int           // Chosen secrets contributing to collective randomness
-	i1            *I1                     // I1 message  sent to servers
-	i2s           map[int]*I2             // I2 messages sent to servers (index: server)
-	i3            *I3                     // I3 messages sent to servers
-	r1s           map[int]*R1             // R1 messages received from servers (index: server)
-	r2s           map[int]*R2             // R2 messages received from servers (index: server)
-	r3s           map[int]*R3             // R3 messages received from servers (index: server)
+	records         map[int]map[int]*Record // Buffer for shares; format: [source][target]*Record
+	chosenSecrets   map[int][]int           // Chosen secrets contributing to collective randomness
+	chosenSecrets32 []uint32                // Chosen secrets (yet another view)
+	i1              *I1                     // I1 message  sent to servers
+	i2s             map[int]*I2             // I2 messages sent to servers (index: server)
+	i3              *I3                     // I3 messages sent to servers
+	r1s             map[int]*R1             // R1 messages received from servers (index: server)
+	r2s             map[int]*R2             // R2 messages received from servers (index: server)
+	r3s             map[int]*R3             // R3 messages received from servers (index: server)
 
 	// Collective signing
 	CoSi      *cosi.CoSi // Collective signing instance
 	statement []byte     // Statement to be collectively signed
+	CoSig     []byte     // Collective signature on statement
 	e         []int      // Participating servers
 }
 
@@ -58,19 +60,18 @@ type Session struct {
 	purpose    string             // Purpose of protocol run
 	time       time.Time          // Timestamp of protocol initiation
 	seed       []byte             // Client-chosen seed for sharding
-	client     abstract.Point     // Client public key
-	sid        []byte             // Session identifier
+	clientKey  abstract.Point     // Client public key
 	servers    [][]*onet.TreeNode // Grouped servers
-	keys       [][]abstract.Point // Grouped server keys
+	serverKeys [][]abstract.Point // Grouped server keys
 	indices    [][]int            // Grouped server indices
 	thresholds []int              // Grouped thresholds
 	groupNum   map[int]int        // Mapping of roster server index to group number
 	groupPos   map[int]int        // Mapping of roster server index to position in the group
+	sid        []byte             // Session identifier
 }
 
 // Record ...
 type Record struct {
-	Key      abstract.Point    // Public server key
 	Eval     abstract.Point    // Commitment of polynomial evaluation
 	EncShare *pvss.PubVerShare // Encrypted verifiable share
 	DecShare *pvss.PubVerShare // Decrypted verifiable share
@@ -91,12 +92,12 @@ type Transcript struct {
 	Purpose       string                  // Purpose of protocol run
 	Time          time.Time               // Timestamp of protocol initiation
 	Seed          []byte                  // Client-chosen seed for sharding
-	Client        abstract.Point          // Client public key
-	SID           []byte                  // Session identifier
-	Servers       []abstract.Point        // Server public keys
+	Keys          []abstract.Point        // Public keys (client + server)
 	Thresholds    []int                   // Grouped secret sharing thresholds
-	ChosenSecrets map[int][]int           // Chosen secrets that contribute to collective randomness
-	Records       map[int]map[int]*Record // Buffer for shares; format: [source][target]*Record
+	SID           []byte                  // Session identifier
+	ChosenSecrets []uint32                // Chosen secrets that contribute to collective randomness
+	CoSig         []byte                  // Collective signature on chosen secrets
+	Records       map[int]map[int]*Record // Record of PVSS shares; format: [source][target]*Record
 }
 
 //I1s           map[int]*I1        // I1 messages sent to servers
