@@ -8,11 +8,9 @@ import (
 
 	"github.com/dedis/crypto/abstract"
 	"github.com/dedis/crypto/cosi"
-	"github.com/dedis/crypto/hash"
 	"github.com/dedis/crypto/random"
 	"github.com/dedis/crypto/share"
 	"github.com/dedis/crypto/share/pvss"
-	"github.com/dedis/onet/network"
 )
 
 // Some error definitions.
@@ -46,12 +44,7 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 	rh.CoSi = cosi.NewCosi(rh.Suite(), rh.Private(), rh.Roster().Publics())
 
 	// Compute hash of the client's message
-	msg.Sig = []byte{0} // XXX: hack
-	i1b, err := network.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	hi1, err := hash.Bytes(rh.Suite().Hash(), i1b)
+	hi1, err := hashMessage(rh.Suite(), msg)
 	if err != nil {
 		return err
 	}
@@ -115,12 +108,16 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 	}
 
 	// Verify that the server replied to the correct I1 message
-	if err := verifyMessage(rh.Suite(), rh.i1, msg.HI1); err != nil {
+	hi1, err := hashMessage(rh.Suite(), rh.i1)
+	if err != nil {
 		return err
 	}
+	if !bytes.Equal(hi1, msg.HI1) {
+		return errors.New("server replied to wrong I1 message")
+	}
 
-	// Record R1 message
-	rh.r1s[src] = msg
+	// Record server commit
+	rh.commits[src] = msg.V
 
 	// Return, if we already committed to secrets before
 	if len(rh.chosenSecrets) > 0 {
@@ -171,7 +168,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 
 	// Proceed, if there are enough good secrets and more than 2/3 of servers replied
 	// TODO: maybe we want to have a timer here to give nodes chances to send their replies
-	if len(goodSecrets) == rh.groups && 2*rh.nodes/3 < len(rh.r1s) {
+	if len(goodSecrets) == rh.groups && 2*rh.nodes/3 < len(rh.records) {
 
 		for i, _ := range rh.servers {
 			// Randomly remove some secrets so that a threshold of secrets remain
@@ -199,8 +196,8 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 		// Collect commits and mark participating nodes
 		rh.e = make([]int, 0)
 		subComms := make([]abstract.Point, 0)
-		for i, msg := range rh.r1s {
-			subComms = append(subComms, msg.V)
+		for i, V := range rh.commits {
+			subComms = append(subComms, V)
 			rh.CoSi.SetMaskBit(i, true)
 			rh.e = append(rh.e, i)
 		}
@@ -266,7 +263,6 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 
 func (rh *RandHound) handleI2(i2 WI2) error {
 	msg := &i2.I2
-	src := i2.RosterIndex
 
 	// Verify I2 message signature
 	if err := verifySchnorr(rh.Suite(), rh.clientKey, msg); err != nil {
@@ -278,31 +274,23 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 		return errorWrongSession
 	}
 
-	// Store the client's message
-	rh.i2s = make(map[int]*I2)
-	rh.i2s[src] = msg
-
-	// Store records
-	//rh.records = make(map[int]map[int]*Record)
-	//rh.records[src] = make(map[int]*Record)
-	//// TODO: verify share before storing!
-	//for i, encShare := range msg.EncShares {
-	//	tgt := encShare.Target
-	//	rh.records[src][tgt] = &Record{
-	//		Eval:     msg.Evals[i],
-	//		EncShare: encShare.PubVerShare,
-	//		DecShare: nil,
-	//	}
-	//}
-
-	// Compute hash of the client's message
-	msg.Sig = []byte{0} // XXX: hack
-	i2b, err := network.Marshal(msg)
-	if err != nil {
-		return err
+	// Store shares and polynomial evaluations
+	rh.records = make(map[int]map[int]*Record)
+	for i, encShare := range msg.EncShares {
+		src := encShare.Source
+		tgt := encShare.Target
+		if _, ok := rh.records[src]; !ok {
+			rh.records[src] = make(map[int]*Record)
+		}
+		rh.records[src][tgt] = &Record{
+			Eval:     msg.Evals[i],
+			EncShare: encShare.PubVerShare,
+			DecShare: nil,
+		}
 	}
 
-	hi2, err := hash.Bytes(rh.Suite().Hash(), i2b)
+	// Compute hash of the client's message
+	hi2, err := hashMessage(rh.Suite(), msg)
 	if err != nil {
 		return err
 	}
@@ -362,8 +350,12 @@ func (rh *RandHound) handleR2(r2 WR2) error {
 	}
 
 	// Verify that server replied to the correct I2 message
-	if err := verifyMessage(rh.Suite(), rh.i2s[src], msg.HI2); err != nil {
+	hi2, err := hashMessage(rh.Suite(), rh.i2s[src])
+	if err != nil {
 		return err
+	}
+	if !bytes.Equal(hi2, msg.HI2) {
+		return errors.New("server replied to wrong I2 message")
 	}
 
 	// Record R2 message
@@ -399,7 +391,6 @@ func (rh *RandHound) handleR2(r2 WR2) error {
 
 func (rh *RandHound) handleI3(i3 WI3) error {
 	msg := &i3.I3
-	src := i3.RosterIndex
 
 	// Verify I3 message signature
 	if err := verifySchnorr(rh.Suite(), rh.clientKey, msg); err != nil {
@@ -427,28 +418,25 @@ func (rh *RandHound) handleI3(i3 WI3) error {
 	}
 
 	// Compute hash of the client's message
-	msg.Sig = []byte{0} // XXX: hack
-	i3b, err := network.Marshal(msg)
-	if err != nil {
-		return err
-	}
-
-	hi3, err := hash.Bytes(rh.Suite().Hash(), i3b)
+	hi3, err := hashMessage(rh.Suite(), msg)
 	if err != nil {
 		return err
 	}
 
 	H, _ := rh.Suite().Point().Pick(nil, rh.Suite().Cipher(msg.SID))
 	decShares := make([]*Share, 0)
-	for i, share := range rh.i2s[src].EncShares {
-		decShare, err := pvss.DecShare(rh.Suite(), H, rh.Public(), rh.i2s[src].Evals[i], rh.Private(), share.PubVerShare)
-		if err == nil {
-			s := &Share{
-				Source:      share.Source,
-				Target:      share.Target,
-				PubVerShare: decShare,
+
+	for src, records := range rh.records {
+		for tgt, record := range records {
+			decShare, err := pvss.DecShare(rh.Suite(), H, rh.Public(), record.Eval, rh.Private(), record.EncShare)
+			if err == nil {
+				s := &Share{
+					Source:      src,
+					Target:      tgt,
+					PubVerShare: decShare,
+				}
+				decShares = append(decShares, s)
 			}
-			decShares = append(decShares, s)
 		}
 	}
 
@@ -467,9 +455,9 @@ func (rh *RandHound) handleI3(i3 WI3) error {
 
 func (rh *RandHound) handleR3(r3 WR3) error {
 	msg := &r3.R3
-	idx := r3.RosterIndex
-	grp := rh.groupNum[idx]
-	pos := rh.groupPos[idx]
+	src := r3.RosterIndex
+	grp := rh.groupNum[src]
+	pos := rh.groupPos[src]
 	rh.mutex.Lock()
 	defer rh.mutex.Unlock()
 
@@ -484,12 +472,16 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 	}
 
 	// Verify that server replied to the correct I3 message
-	if err := verifyMessage(rh.Suite(), rh.i3, msg.HI3); err != nil {
+	hi3, err := hashMessage(rh.Suite(), rh.i3)
+	if err != nil {
 		return err
+	}
+	if !bytes.Equal(hi3, msg.HI3) {
+		return errors.New("server replied to wrong I3 message")
 	}
 
 	// Record R3 message
-	rh.r3s[idx] = msg
+	rh.r3s[src] = msg
 
 	// Verify decrypted shares and record valid ones
 	G := rh.Suite().Point().Base()
@@ -500,19 +492,19 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 		if _, ok := rh.records[src][tgt]; !ok {
 			continue
 		}
-		r := rh.records[src][tgt]
+		record := rh.records[src][tgt]
 		X := K[tgt]
-		encShare := r.EncShare
+		encShare := record.EncShare
 		decShare := share.PubVerShare
 		if pvss.VerifyDecShare(rh.Suite(), G, X, encShare, decShare) == nil {
-			r.DecShare = decShare
-			rh.records[src][tgt] = r
+			record.DecShare = decShare
+			rh.records[src][tgt] = record
 		}
 	}
 
 	proceed := true
 	for src, records := range rh.records {
-		c := 0
+		c := 0 // enough shares?
 		for _, record := range records {
 			if record.EncShare != nil && record.DecShare != nil {
 				c += 1
@@ -523,20 +515,6 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 			proceed = false
 		}
 	}
-
-	//for i, group := range rh.chosenSecrets {
-	//	for _, src := range group {
-	//		c := 0 // enough shares?
-	//		for _, record := range rh.records[src] {
-	//			if record.EncShare != nil && record.DecShare != nil {
-	//				c += 1
-	//			}
-	//		}
-	//		if c < rh.thresholds[i] {
-	//			proceed = false
-	//		}
-	//	}
-	//}
 
 	if len(rh.r3s) == rh.nodes-1 && !proceed {
 		rh.Done <- true

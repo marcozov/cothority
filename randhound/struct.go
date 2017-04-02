@@ -40,6 +40,7 @@ type RandHound struct {
 	r2s                    map[int]*R2             // R2 messages received from servers (index: server)
 	r3s                    map[int]*R3             // R3 messages received from servers (index: server)
 	CoSi                   *cosi.CoSi              // Collective signing instance
+	commits                map[int]abstract.Point  // Commits for collective signing
 	chosenSecrets          []uint32                // Chosen secrets contributing to collective randomness
 	records                map[int]map[int]*Record // Records with shares of chosen PVSS secrets; format: [source][target]*Record
 	statement              []byte                  // Statement to be collectively signed
@@ -77,6 +78,9 @@ type Share struct {
 	Target      int               // Target roster index
 	PubVerShare *pvss.PubVerShare // Public verifiable share
 }
+
+// TODO: Do we need to store the public commitment polynomials in the transcript?
+// NOTE: We already store the evaluations of the polynomials in the records.
 
 // Transcript represents the record of a protocol run created by the client.
 type Transcript struct {

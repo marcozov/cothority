@@ -33,7 +33,6 @@ func NewRandHound(node *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 // Setup initializes a RandHound instance on client-side and sets some basic
 // parameters. Needs to be called before Start.
 func (rh *RandHound) Setup(nodes int, groups int, purpose string) error {
-
 	var err error
 
 	// Setup session
@@ -45,6 +44,7 @@ func (rh *RandHound) Setup(nodes int, groups int, purpose string) error {
 	rh.CoSi = cosi.NewCosi(rh.Suite(), rh.Private(), rh.Roster().Publics())
 
 	rh.records = make(map[int]map[int]*Record)
+	rh.commits = make(map[int]abstract.Point)
 	rh.i2s = make(map[int]*I2)
 	rh.r1s = make(map[int]*R1)
 	rh.r2s = make(map[int]*R2)
@@ -59,7 +59,6 @@ func (rh *RandHound) Setup(nodes int, groups int, purpose string) error {
 // chooses the server grouping, forms an I1 message for each group, and sends
 // it to all servers of that group.
 func (rh *RandHound) Start() error {
-
 	rh.mutex.Lock()
 	defer rh.mutex.Unlock()
 

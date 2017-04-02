@@ -3,7 +3,6 @@ package randhound
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"reflect"
 	"sort"
 	"time"
@@ -222,9 +221,7 @@ func verifySchnorr(suite abstract.Suite, key abstract.Point, m interface{}) erro
 	return sign.VerifySchnorr(suite, key, mb, sig)
 }
 
-func verifyMessage(suite abstract.Suite, m interface{}, hash1 []byte) error {
-	// Make a copy of the signature
-	sig := reflect.ValueOf(m).Elem().FieldByName("Sig").Bytes()
+func hashMessage(suite abstract.Suite, m interface{}) ([]byte, error) {
 
 	// Reset signature field
 	reflect.ValueOf(m).Elem().FieldByName("Sig").SetBytes([]byte{0}) // XXX: hack
@@ -232,22 +229,14 @@ func verifyMessage(suite abstract.Suite, m interface{}, hash1 []byte) error {
 	// Marshal ...
 	mb, err := network.Marshal(m) // TODO: change m to interface with hash to make it compatible to other languages (network.Marshal() adds struct-identifiers)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// ... and hash message
-	hash2, err := hash.Bytes(suite.Hash(), mb)
+	hash, err := hash.Bytes(suite.Hash(), mb)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// Copy back original signature
-	reflect.ValueOf(m).Elem().FieldByName("Sig").SetBytes(sig) // XXX: hack
-
-	// Compare hashes
-	if !bytes.Equal(hash1, hash2) {
-		return errors.New("wrong message content")
-	}
-
-	return nil
+	return hash, nil
 }
