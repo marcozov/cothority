@@ -37,21 +37,20 @@ type RandHound struct {
 	SecretReady            bool       // Boolean to indicate whether the collect randomness is ready or not
 
 	// Message records (TODO: check which ones are really needed)
-	records         map[int]map[int]*Record // Buffer for shares; format: [source][target]*Record
-	chosenSecrets   map[int][]int           // Chosen secrets contributing to collective randomness
-	chosenSecrets32 []uint32                // Chosen secrets (yet another view)
-	i1              *I1                     // I1 message  sent to servers
-	i2s             map[int]*I2             // I2 messages sent to servers (index: server)
-	i3              *I3                     // I3 messages sent to servers
-	r1s             map[int]*R1             // R1 messages received from servers (index: server)
-	r2s             map[int]*R2             // R2 messages received from servers (index: server)
-	r3s             map[int]*R3             // R3 messages received from servers (index: server)
+	records map[int]map[int]*Record // Buffer for shares; format: [source][target]*Record
+	i1      *I1                     // I1 message  sent to servers
+	i2s     map[int]*I2             // I2 messages sent to servers (index: server)
+	i3      *I3                     // I3 messages sent to servers
+	r1s     map[int]*R1             // R1 messages received from servers (index: server)
+	r2s     map[int]*R2             // R2 messages received from servers (index: server)
+	r3s     map[int]*R3             // R3 messages received from servers (index: server)
 
 	// Collective signing
-	CoSi      *cosi.CoSi // Collective signing instance
-	statement []byte     // Statement to be collectively signed
-	CoSig     []byte     // Collective signature on statement
-	e         []int      // Participating servers
+	CoSi          *cosi.CoSi // Collective signing instance
+	chosenSecrets []uint32   // Chosen secrets contributing to collective randomness
+	statement     []byte     // Statement to be collectively signed
+	CoSig         []byte     // Collective signature on statement
+	e             []int      // Participating servers
 }
 
 type Session struct {
@@ -87,25 +86,17 @@ type Share struct {
 
 // Transcript represents the record of a protocol run created by the client.
 type Transcript struct {
-	Nodes         int                     // Total number of nodes (client + server)
-	Groups        int                     // Number of groups
-	Purpose       string                  // Purpose of protocol run
-	Time          time.Time               // Timestamp of protocol initiation
-	Seed          []byte                  // Client-chosen seed for sharding
-	Keys          []abstract.Point        // Public keys (client + server)
-	Thresholds    []int                   // Grouped secret sharing thresholds
-	SID           []byte                  // Session identifier
-	ChosenSecrets []uint32                // Chosen secrets that contribute to collective randomness
-	CoSig         []byte                  // Collective signature on chosen secrets
-	Records       map[int]map[int]*Record // Record of PVSS shares; format: [source][target]*Record
+	Nodes      int                     // Total number of nodes (client + server)
+	Groups     int                     // Number of groups
+	Purpose    string                  // Purpose of protocol run
+	Time       time.Time               // Timestamp of protocol initiation
+	Seed       []byte                  // Client-chosen seed for sharding
+	Keys       []abstract.Point        // Public keys (client + server)
+	Thresholds []int                   // Grouped secret sharing thresholds
+	SID        []byte                  // Session identifier
+	CoSig      []byte                  // Collective signature on chosen secrets
+	Records    map[int]map[int]*Record // Records containing chosen PVSS shares; format: [source][target]*Record
 }
-
-//I1s           map[int]*I1        // I1 messages sent to servers
-//I2s           map[int]*I2        // I2 messages sent to servers
-//I3s           map[int]*I3        // I3 messages sent to servers
-//R1s           map[int]*R1        // R1 messages received from servers
-//R2s           map[int]*R2        // R2 messages received from servers
-//R3s           map[int]*R3        // R3 messages received from servers
 
 // I1 is the message sent by the client to the servers in step 1.
 type I1 struct {
@@ -131,7 +122,7 @@ type R1 struct {
 type I2 struct {
 	Sig           []byte           // Schnorr signature
 	SID           []byte           // Session identifier
-	ChosenSecrets []uint32         // Chosen secrets (flattened)
+	ChosenSecrets []uint32         // Chosen secrets
 	EncShares     []*Share         // Encrypted PVSS shares
 	Evals         []abstract.Point // Commitments of polynomial evaluations
 	C             abstract.Scalar  // Challenge used to sign chosen secrets

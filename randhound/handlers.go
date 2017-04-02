@@ -12,7 +12,6 @@ import (
 	"github.com/dedis/crypto/random"
 	"github.com/dedis/crypto/share"
 	"github.com/dedis/crypto/share/pvss"
-	"github.com/dedis/onet/log"
 	"github.com/dedis/onet/network"
 )
 
@@ -24,9 +23,9 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 	var err error
 	src := i1.RosterIndex
 	idx := rh.TreeNode().RosterIndex
-
-	nodes := len(rh.Roster().List)
-	clientKey := rh.Roster().Publics()[src] // List[src].Public
+	keys := rh.Roster().Publics()
+	nodes := len(keys)
+	clientKey := keys[src]
 
 	// Verify I1 message signature
 	if err := verifySchnorr(rh.Suite(), clientKey, msg); err != nil {
@@ -34,7 +33,7 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 	}
 
 	// Setup session
-	if rh.Session, err = rh.newSession(nodes, msg.Groups, msg.Purpose, msg.Time, msg.Seed, client); err != nil {
+	if rh.Session, err = rh.newSession(nodes, msg.Groups, msg.Purpose, msg.Time, msg.Seed, clientKey); err != nil {
 		return err
 	}
 
@@ -173,7 +172,6 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 	// Proceed, if there are enough good secrets and more than 2/3 of servers replied
 	if len(goodSecrets) == rh.groups && 2*rh.nodes/3 < len(rh.r1s) {
 
-		chosenSecrets := make([]uint32, 0)
 		for i, _ := range rh.servers {
 			// Randomly remove some secrets so that a threshold of secrets remain
 			rand := random.Bytes(rh.Suite().Hash().Size(), random.Stream)
@@ -182,17 +180,12 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 			l := len(secrets) - rh.thresholds[i]
 			for j := 0; j < l; j++ {
 				k := int(random.Uint32(prng) % uint32(len(secrets)))
-				secrets = append(secrets[:k], secrets[k+1:]...)
+				delete(rh.records, secrets[k]) // XXX: check that this works!!!!
 			}
-			// TODO: take care of the mess between chosenSecrets and rh.chosenSecrets and rh.chosenSecrets32!
-			for j := 0; j < len(secrets); j++ {
-				chosenSecrets = append(chosenSecrets, uint32(secrets[j]))
-			}
-			rh.chosenSecrets[i] = secrets
-			//log.Lvlf1("Group: %v %v %v", i, rh.thresholds[i], rh.indices[i])
 		}
 
-		log.Lvlf1("ChosenSecrets: %v", rh.chosenSecrets)
+		// Recover chosen secrets from records
+		rh.chosenSecrets = chosenSecrets(rh.records)
 
 		// Clear CoSi mask
 		for i := 0; i < rh.nodes; i++ {
@@ -219,12 +212,10 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 		if _, err := buf.Write(rh.sid); err != nil {
 			return err
 		}
-		for _, cs := range chosenSecrets {
+		for _, cs := range rh.chosenSecrets {
 			binary.Write(buf, binary.LittleEndian, cs)
 		}
 		rh.statement = buf.Bytes()
-
-		rh.chosenSecrets32 = chosenSecrets
 
 		// Compute CoSi challenge
 		if _, err := rh.CoSi.CreateChallenge(rh.statement); err != nil {
@@ -240,20 +231,22 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 				var encShares []*Share
 				var evals []abstract.Point
 				src := server.RosterIndex
-				for _, tgt := range rh.chosenSecrets[i] {
-					r := rh.records[tgt][src]
-					encShare := &Share{
-						Source:      tgt, // NOTE: this swap is correct!
-						Target:      src, // NOTE: this swap is correct!
-						PubVerShare: r.EncShare,
+				for _, tgt := range rh.indices[i] {
+					if _, ok := rh.records[tgt][src]; ok {
+						record := rh.records[tgt][src]
+						encShare := &Share{
+							Source:      tgt, // NOTE: this swap is correct!
+							Target:      src, // NOTE: this swap is correct!
+							PubVerShare: record.EncShare,
+						}
+						encShares = append(encShares, encShare)
+						evals = append(evals, record.Eval)
 					}
-					encShares = append(encShares, encShare)
-					evals = append(evals, r.Eval)
 				}
 				i2 := &I2{
 					Sig:           []byte{0},
 					SID:           rh.sid,
-					ChosenSecrets: chosenSecrets,
+					ChosenSecrets: rh.chosenSecrets,
 					EncShares:     encShares,
 					Evals:         evals,
 					C:             rh.CoSi.GetChallenge(),
@@ -302,21 +295,14 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 	}
 
 	// Record chosen secrets
-	rh.chosenSecrets = make(map[int][]int)
-	for _, cs := range msg.ChosenSecrets {
-		grp := rh.groupNum[int(cs)]
-		if _, ok := rh.chosenSecrets[grp]; !ok {
-			rh.chosenSecrets[grp] = make([]int, 0)
-		}
-		rh.chosenSecrets[grp] = append(rh.chosenSecrets[grp], int(cs))
-	}
+	rh.chosenSecrets = msg.ChosenSecrets
 
-	// Check that the chosen secrets satisfy the thresholds
-	for i, secrets := range rh.chosenSecrets {
-		if len(secrets) != len(rh.servers[i])/3+1 {
-			return fmt.Errorf("wrong threshold")
-		}
-	}
+	// TODO: Check that the chosen secrets satisfy the thresholds
+	//for i, secrets := range rh.chosenSecrets {
+	//	if len(secrets) != len(rh.servers[i])/3+1 {
+	//		return fmt.Errorf("wrong threshold")
+	//	}
+	//}
 
 	if !(rh.nodes/3 < len(msg.ChosenSecrets)) {
 		return fmt.Errorf("not enough chosen secrets")
@@ -510,19 +496,32 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 	}
 
 	proceed := true
-	for i, group := range rh.chosenSecrets {
-		for _, src := range group {
-			c := 0 // enough shares?
-			for _, record := range rh.records[src] {
-				if record.EncShare != nil && record.DecShare != nil {
-					c += 1
-				}
-			}
-			if c < rh.thresholds[i] {
-				proceed = false
+	for src, records := range rh.records {
+		c := 0
+		for _, record := range records {
+			if record.EncShare != nil && record.DecShare != nil {
+				c += 1
 			}
 		}
+		grp := rh.groupNum[src]
+		if c < rh.thresholds[grp] {
+			proceed = false
+		}
 	}
+
+	//for i, group := range rh.chosenSecrets {
+	//	for _, src := range group {
+	//		c := 0 // enough shares?
+	//		for _, record := range rh.records[src] {
+	//			if record.EncShare != nil && record.DecShare != nil {
+	//				c += 1
+	//			}
+	//		}
+	//		if c < rh.thresholds[i] {
+	//			proceed = false
+	//		}
+	//	}
+	//}
 
 	if len(rh.r3s) == rh.nodes-1 && !proceed {
 		rh.Done <- true

@@ -45,7 +45,7 @@ func (rh *RandHound) Setup(nodes int, groups int, purpose string) error {
 	rh.CoSi = cosi.NewCosi(rh.Suite(), rh.Private(), rh.Roster().Publics())
 
 	rh.records = make(map[int]map[int]*Record)
-	rh.chosenSecrets = make(map[int][]int)
+	//rh.chosenSecrets = make(map[int][]int)
 	rh.i2s = make(map[int]*I2)
 	rh.r1s = make(map[int]*R1)
 	rh.r2s = make(map[int]*R2)
@@ -122,24 +122,40 @@ func (rh *RandHound) Random() ([]byte, *Transcript, error) {
 	}
 
 	// Recover randomness
-	rb, err := recoverRandomness(rh.Suite(), rh.sid, rh.Roster().Publics(), rh.chosenSecrets32, rh.thresholds, rh.groupNum, rh.indices, rh.records)
+	rb, err := recoverRandomness(rh.Suite(), rh.sid, rh.Roster().Publics(), rh.thresholds, rh.groupNum, rh.indices, rh.records)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// For efficiency only store chosen secret records in transcript
+	//chosenRecords := make(map[int]map[int]*Record)
+	//for _, src := range rh.chosenSecrets {
+	//	if _, ok := chosenRecords[int(src)]; !ok {
+	//		chosenRecords[int(src)] = make(map[int]*Record)
+	//	}
+	//	for tgt, record := range rh.records[int(src)] {
+	//		if record.Eval != nil && record.EncShare != nil && record.DecShare != nil {
+	//			chosenRecords[int(src)][tgt] = &Record{
+	//				Eval:     record.Eval,
+	//				EncShare: record.EncShare,
+	//				DecShare: record.DecShare,
+	//			}
+	//		}
+	//	}
+	//}
+
 	// Setup transcript
 	transcript := &Transcript{
-		Nodes:         rh.nodes,
-		Groups:        rh.groups,
-		Purpose:       rh.purpose,
-		Time:          rh.time,
-		Seed:          rh.seed,
-		Keys:          rh.Roster().Publics(),
-		Thresholds:    rh.thresholds,
-		SID:           rh.sid,
-		ChosenSecrets: rh.chosenSecrets32,
-		CoSig:         rh.CoSig,
-		Records:       rh.records,
+		Nodes:      rh.nodes,
+		Groups:     rh.groups,
+		Purpose:    rh.purpose,
+		Time:       rh.time,
+		Seed:       rh.seed,
+		Keys:       rh.Roster().Publics(),
+		Thresholds: rh.thresholds,
+		SID:        rh.sid,
+		CoSig:      rh.CoSig,
+		Records:    rh.records,
 	}
 
 	return rb, transcript, nil
@@ -176,12 +192,15 @@ func (rh *RandHound) Verify(suite abstract.Suite, random []byte, t *Transcript) 
 		return fmt.Errorf("wrong session identifier")
 	}
 
+	// Recover chosen secrets from records
+	chosenSecrets := chosenSecrets(t.Records)
+
 	// Recover statement = SID || chosen secrets
 	statement := new(bytes.Buffer)
 	if _, err := statement.Write(t.SID); err != nil {
 		return err
 	}
-	for _, cs := range t.ChosenSecrets {
+	for _, cs := range chosenSecrets {
 		binary.Write(statement, binary.LittleEndian, cs)
 	}
 
@@ -190,8 +209,8 @@ func (rh *RandHound) Verify(suite abstract.Suite, random []byte, t *Transcript) 
 		return err
 	}
 
-	// Recover randomness
-	rb, err := recoverRandomness(suite, t.SID, t.Keys, t.ChosenSecrets, t.Thresholds, rh.groupNum, indices, t.Records)
+	// Recover randomness (TODO: get rid of the groupNum parameter!)
+	rb, err := recoverRandomness(suite, t.SID, t.Keys, t.Thresholds, rh.groupNum, indices, t.Records)
 	if err != nil {
 		return err
 	}

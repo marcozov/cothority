@@ -43,8 +43,8 @@ func TestRandHound(test *testing.T) {
 		}
 		log.Lvlf1("RandHound - collective randomness: ok")
 
-		log.Lvlf1("RandHound - collective randomness: %v", random)
-		_ = transcript
+		//log.Lvlf1("RandHound - collective randomness: %v", random)
+		//_ = transcript
 
 		err = rh.Verify(rh.Suite(), random, transcript)
 		if err != nil {

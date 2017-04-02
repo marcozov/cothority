@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"reflect"
+	"sort"
 	"time"
 
 	"github.com/dedis/crypto/abstract"
@@ -130,16 +131,16 @@ func (rh *RandHound) sessionID(clientKey abstract.Point, serverKeys [][]abstract
 	return hash.Bytes(rh.Suite().Hash(), keyBuf.Bytes(), idxBuf.Bytes(), miscBuf.Bytes())
 }
 
-func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, chosenSecrets []uint32, thresholds []int, groupNum map[int]int, indices [][]int, records map[int]map[int]*Record) ([]byte, error) {
+func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, thresholds []int, groupNum map[int]int, indices [][]int, records map[int]map[int]*Record) ([]byte, error) {
 	rnd := suite.Point().Null()
 	G := suite.Point().Base()
 	H, _ := suite.Point().Pick(nil, suite.Cipher(sid))
-	for _, src := range chosenSecrets {
-		groupKeys := make([]abstract.Point, 0)
-		encShares := make([]*pvss.PubVerShare, 0)
-		decShares := make([]*pvss.PubVerShare, 0)
-		for tgt, record := range records[int(src)] {
-			if record.EncShare != nil && record.DecShare != nil {
+	for src, _ := range records {
+		var groupKeys []abstract.Point
+		var encShares []*pvss.PubVerShare
+		var decShares []*pvss.PubVerShare
+		for tgt, record := range records[src] {
+			if record.Eval != nil && record.EncShare != nil && record.DecShare != nil {
 				if pvss.VerifyEncShare(suite, H, keys[tgt], record.Eval, record.EncShare) == nil {
 					groupKeys = append(groupKeys, keys[tgt])
 					encShares = append(encShares, record.EncShare)
@@ -147,7 +148,7 @@ func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, 
 				}
 			}
 		}
-		grp := groupNum[int(src)]
+		grp := groupNum[src]
 		ps, err := pvss.RecoverSecret(suite, G, groupKeys, encShares, decShares, thresholds[grp], len(indices[grp]))
 		if err != nil {
 			return nil, err
@@ -159,6 +160,17 @@ func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, 
 		return nil, err
 	}
 	return rb, nil
+}
+
+func chosenSecrets(records map[int]map[int]*Record) []uint32 {
+	var chosenSecrets []uint32
+	for src, _ := range records {
+		chosenSecrets = append(chosenSecrets, uint32(src))
+	}
+	sort.Slice(chosenSecrets, func(i, j int) bool {
+		return chosenSecrets[i] < chosenSecrets[j]
+	})
+	return chosenSecrets
 }
 
 func signSchnorr(suite abstract.Suite, key abstract.Scalar, m interface{}) error {
