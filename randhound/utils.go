@@ -154,13 +154,11 @@ func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, 
 		}
 		rnd = suite.Point().Add(rnd, ps)
 	}
-
 	rb, err := rnd.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
 	return rb, nil
-
 }
 
 func signSchnorr(suite abstract.Suite, key abstract.Scalar, m interface{}) error {

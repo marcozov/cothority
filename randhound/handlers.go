@@ -26,10 +26,10 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 	idx := rh.TreeNode().RosterIndex
 
 	nodes := len(rh.Roster().List)
-	client := rh.Roster().List[src].Public
+	clientKey := rh.Roster().Publics()[src] // List[src].Public
 
 	// Verify I1 message signature
-	if err := verifySchnorr(rh.Suite(), client, msg); err != nil {
+	if err := verifySchnorr(rh.Suite(), clientKey, msg); err != nil {
 		return err
 	}
 
