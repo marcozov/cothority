@@ -124,11 +124,9 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 		return nil
 	}
 
-	// Recover commitment polynomial
+	// Verify encrypted shares and record valid ones
 	H, _ := rh.Suite().Point().Pick(nil, rh.Suite().Cipher(rh.sid))
 	pubPoly := share.NewPubPoly(rh.Suite(), H, msg.Coeffs)
-
-	// Verify encrypted shares and record valid ones
 	for _, encShare := range msg.EncShares {
 		pos := encShare.PubVerShare.S.I
 		sH := pubPoly.Eval(pos).V
@@ -194,12 +192,12 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 		rh.CoSi.SetMaskBit(rh.TreeNode().RosterIndex, true)
 
 		// Collect commits and mark participating nodes
-		rh.e = make([]int, 0)
+		rh.participants = make([]int, 0)
 		subComms := make([]abstract.Point, 0)
 		for i, V := range rh.commits {
 			subComms = append(subComms, V)
 			rh.CoSi.SetMaskBit(i, true)
-			rh.e = append(rh.e, i)
+			rh.participants = append(rh.participants, i)
 		}
 
 		// Compute aggregate commit
@@ -228,12 +226,12 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 				// target server
 				var encShares []*Share
 				var evals []abstract.Point
-				src := server.RosterIndex
-				for _, tgt := range rh.indices[i] {
-					if record, ok := rh.records[tgt][src]; ok {
+				tgt := server.RosterIndex
+				for _, src := range rh.indices[i] {
+					if record, ok := rh.records[src][tgt]; ok {
 						encShare := &Share{
-							Source:      tgt, // NOTE: this swap is correct!
-							Target:      src, // NOTE: this swap is correct!
+							Source:      src,
+							Target:      tgt,
 							PubVerShare: record.EncShare,
 						}
 						encShares = append(encShares, encShare)
@@ -251,7 +249,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 				if err := signSchnorr(rh.Suite(), rh.Private(), i2); err != nil {
 					return err
 				}
-				rh.i2s[src] = i2
+				rh.i2s[tgt] = i2
 				if err := rh.SendTo(server, i2); err != nil {
 					return err
 				}
@@ -274,18 +272,24 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 		return errorWrongSession
 	}
 
-	// Store shares and polynomial evaluations
+	// Verify encrypted shares and record valid ones
+	H, _ := rh.Suite().Point().Pick(nil, rh.Suite().Cipher(rh.sid))
 	rh.records = make(map[int]map[int]*Record)
 	for i, encShare := range msg.EncShares {
+		pos := encShare.PubVerShare.S.I
 		src := encShare.Source
 		tgt := encShare.Target
+		grp := rh.groupNum[src]
+		key := rh.serverKeys[grp][pos]
 		if _, ok := rh.records[src]; !ok {
 			rh.records[src] = make(map[int]*Record)
 		}
-		rh.records[src][tgt] = &Record{
-			Eval:     msg.Evals[i],
-			EncShare: encShare.PubVerShare,
-			DecShare: nil,
+		if pvss.VerifyEncShare(rh.Suite(), H, key, msg.Evals[i], encShare.PubVerShare) == nil {
+			rh.records[src][tgt] = &Record{
+				Eval:     msg.Evals[i],
+				EncShare: encShare.PubVerShare,
+				DecShare: nil,
+			}
 		}
 	}
 
@@ -365,7 +369,7 @@ func (rh *RandHound) handleR2(r2 WR2) error {
 	// nodes that we chose earlier. Should we have a timer?
 	if len(rh.r2s) == rh.nodes-1 {
 		responses := make([]abstract.Scalar, 0)
-		for _, src := range rh.e {
+		for _, src := range rh.participants {
 			responses = append(responses, rh.r2s[src].R)
 		}
 		if _, err := rh.CoSi.Response(responses); err != nil {
@@ -485,7 +489,7 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 
 	// Verify decrypted shares and record valid ones
 	G := rh.Suite().Point().Base()
-	K := rh.Roster().Publics()
+	keys := rh.Roster().Publics()
 	for _, share := range msg.DecShares {
 		src := share.Source
 		tgt := share.Target
@@ -493,10 +497,10 @@ func (rh *RandHound) handleR3(r3 WR3) error {
 			continue
 		}
 		record := rh.records[src][tgt]
-		X := K[tgt]
+		key := keys[tgt]
 		encShare := record.EncShare
 		decShare := share.PubVerShare
-		if pvss.VerifyDecShare(rh.Suite(), G, X, encShare, decShare) == nil {
+		if pvss.VerifyDecShare(rh.Suite(), G, key, encShare, decShare) == nil {
 			record.DecShare = decShare
 			rh.records[src][tgt] = record
 		}
