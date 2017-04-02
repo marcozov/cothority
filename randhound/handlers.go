@@ -254,7 +254,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 				if err := signSchnorr(rh.Suite(), rh.Private(), i2); err != nil {
 					return err
 				}
-				rh.i2s[server.RosterIndex] = i2
+				rh.i2s[src] = i2
 				if err := rh.SendTo(server, i2); err != nil {
 					return err
 				}
@@ -281,6 +281,19 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 	// Store the client's message
 	rh.i2s = make(map[int]*I2)
 	rh.i2s[src] = msg
+
+	// Store records
+	//rh.records = make(map[int]map[int]*Record)
+	//rh.records[src] = make(map[int]*Record)
+	//// TODO: verify share before storing!
+	//for i, encShare := range msg.EncShares {
+	//	tgt := encShare.Target
+	//	rh.records[src][tgt] = &Record{
+	//		Eval:     msg.Evals[i],
+	//		EncShare: encShare.PubVerShare,
+	//		DecShare: nil,
+	//	}
+	//}
 
 	// Compute hash of the client's message
 	msg.Sig = []byte{0} // XXX: hack
@@ -403,7 +416,7 @@ func (rh *RandHound) handleI3(i3 WI3) error {
 	if _, err := buf.Write(rh.sid); err != nil {
 		return err
 	}
-	for _, cs := range rh.i2s[src].ChosenSecrets {
+	for _, cs := range rh.chosenSecrets {
 		binary.Write(buf, binary.LittleEndian, cs)
 	}
 	rh.statement = buf.Bytes()
