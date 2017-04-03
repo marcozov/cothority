@@ -41,7 +41,7 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 	}
 
 	// Setup CoSi instance
-	rh.CoSi = cosi.NewCosi(rh.Suite(), rh.Private(), rh.Roster().Publics())
+	rh.cosi = cosi.NewCosi(rh.Suite(), rh.Private(), rh.Roster().Publics())
 
 	// Compute hash of the client's message
 	hi1, err := hashMessage(rh.Suite(), msg)
@@ -77,7 +77,7 @@ func (rh *RandHound) handleI1(i1 WI1) error {
 		HI1:       hi1,
 		EncShares: shares,
 		Coeffs:    coeffs,
-		V:         rh.CoSi.CreateCommitment(random.Stream),
+		V:         rh.cosi.CreateCommitment(random.Stream),
 	}
 
 	// Sign R1 message
@@ -185,23 +185,23 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 
 		// Clear CoSi mask
 		for i := 0; i < rh.nodes; i++ {
-			rh.CoSi.SetMaskBit(i, false)
+			rh.cosi.SetMaskBit(i, false)
 		}
 
 		// Set our own masking bit
-		rh.CoSi.SetMaskBit(rh.TreeNode().RosterIndex, true)
+		rh.cosi.SetMaskBit(rh.TreeNode().RosterIndex, true)
 
 		// Collect commits and mark participating nodes
 		rh.participants = make([]int, 0)
 		subComms := make([]abstract.Point, 0)
 		for i, V := range rh.commits {
 			subComms = append(subComms, V)
-			rh.CoSi.SetMaskBit(i, true)
+			rh.cosi.SetMaskBit(i, true)
 			rh.participants = append(rh.participants, i)
 		}
 
 		// Compute aggregate commit
-		rh.CoSi.Commit(random.Stream, subComms)
+		rh.cosi.Commit(random.Stream, subComms)
 
 		// Compute message: statement = SID || chosen secrets
 		buf := new(bytes.Buffer)
@@ -214,7 +214,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 		rh.statement = buf.Bytes()
 
 		// Compute CoSi challenge
-		if _, err := rh.CoSi.CreateChallenge(rh.statement); err != nil {
+		if _, err := rh.cosi.CreateChallenge(rh.statement); err != nil {
 			return err
 		}
 
@@ -244,7 +244,7 @@ func (rh *RandHound) handleR1(r1 WR1) error {
 					ChosenSecrets: rh.chosenSecrets,
 					EncShares:     encShares,
 					Evals:         evals,
-					C:             rh.CoSi.GetChallenge(),
+					C:             rh.cosi.GetChallenge(),
 				}
 				if err := signSchnorr(rh.Suite(), rh.Private(), i2); err != nil {
 					return err
@@ -314,8 +314,8 @@ func (rh *RandHound) handleI2(i2 WI2) error {
 		}
 	}
 
-	rh.CoSi.Challenge(msg.C)
-	r, err := rh.CoSi.CreateResponse()
+	rh.cosi.Challenge(msg.C)
+	r, err := rh.cosi.CreateResponse()
 	if err != nil {
 		return err
 	}
@@ -372,16 +372,16 @@ func (rh *RandHound) handleR2(r2 WR2) error {
 		for _, src := range rh.participants {
 			responses = append(responses, rh.r2s[src].R)
 		}
-		if _, err := rh.CoSi.Response(responses); err != nil {
+		if _, err := rh.cosi.Response(responses); err != nil {
 			return err
 		}
-		rh.CoSig = rh.CoSi.Signature()
-		if err := cosi.VerifySignature(rh.Suite(), rh.Roster().Publics(), rh.statement, rh.CoSig); err != nil {
+		rh.cosig = rh.cosi.Signature()
+		if err := cosi.VerifySignature(rh.Suite(), rh.Roster().Publics(), rh.statement, rh.cosig); err != nil {
 			return err
 		}
 		rh.i3 = &I3{
 			SID:   rh.sid,
-			CoSig: rh.CoSig,
+			CoSig: rh.cosig,
 		}
 		if err := signSchnorr(rh.Suite(), rh.Private(), rh.i3); err != nil {
 			return err

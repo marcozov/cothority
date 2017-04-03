@@ -130,6 +130,17 @@ func (rh *RandHound) sessionID(clientKey abstract.Point, serverKeys [][]abstract
 	return hash.Bytes(rh.Suite().Hash(), keyBuf.Bytes(), idxBuf.Bytes(), miscBuf.Bytes())
 }
 
+func (rh *RandHound) newMessages() *Messages {
+	return &Messages{
+		i1:  nil,
+		i2s: make(map[int]*I2),
+		i3:  nil,
+		r1s: make(map[int]*R1),
+		r2s: make(map[int]*R2),
+		r3s: make(map[int]*R3),
+	}
+}
+
 func recoverRandomness(suite abstract.Suite, sid []byte, keys []abstract.Point, thresholds []int, indices [][]int, records map[int]map[int]*Record) ([]byte, error) {
 	rnd := suite.Point().Null()
 	G := suite.Point().Base()

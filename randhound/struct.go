@@ -29,27 +29,23 @@ func init() {
 // onet.ProtocolInstance interface.
 type RandHound struct {
 	*onet.TreeNodeInstance                         // The tree node instance of the client / server
-	*Session                                       // Session information
+	*Session                                       // Session information (client and servers)
+	*Messages                                      // Message information (client only)
 	mutex                  sync.Mutex              // An awesome mutex!
 	Done                   chan bool               // Channel to signal the end of a protocol run
 	SecretReady            bool                    // Boolean to indicate whether the collect randomness is ready or not
-	CoSi                   *cosi.CoSi              // Collective signing instance
+	cosi                   *cosi.CoSi              // Collective signing instance
 	commits                map[int]abstract.Point  // Commits for collective signing
 	chosenSecrets          []uint32                // Chosen secrets contributing to collective randomness
 	records                map[int]map[int]*Record // Records with shares of chosen PVSS secrets; format: [source][target]*Record
 	statement              []byte                  // Statement to be collectively signed
-	CoSig                  []byte                  // Collective signature on statement
+	cosig                  []byte                  // Collective signature on statement
 	participants           []int                   // Servers participating in collective signing
-	i1                     *I1                     // I1 message sent to servers
-	i2s                    map[int]*I2             // I2 messages sent to servers (index: server)
-	i3                     *I3                     // I3 message sent to servers
-	r1s                    map[int]*R1             // R1 messages received from servers (index: server)
-	r2s                    map[int]*R2             // R2 messages received from servers (index: server)
-	r3s                    map[int]*R3             // R3 messages received from servers (index: server)
 }
 
+// Session ...
 type Session struct {
-	nodes      int                // Total number of nodes (client + servers)
+	nodes      int                // Total number of nodes (client and servers)
 	groups     int                // Number of groups
 	purpose    string             // Purpose of protocol run
 	time       time.Time          // Timestamp of protocol initiation
@@ -62,6 +58,16 @@ type Session struct {
 	groupNum   map[int]int        // Mapping of roster server index to group number
 	groupPos   map[int]int        // Mapping of roster server index to position in the group
 	sid        []byte             // Session identifier
+}
+
+// Messages ...
+type Messages struct {
+	i1  *I1         // I1 message sent to servers
+	i2s map[int]*I2 // I2 messages sent to servers (index: server)
+	i3  *I3         // I3 message sent to servers
+	r1s map[int]*R1 // R1 messages received from servers (index: server)
+	r2s map[int]*R2 // R2 messages received from servers (index: server)
+	r3s map[int]*R3 // R3 messages received from servers (index: server)
 }
 
 // Record ...

@@ -35,20 +35,20 @@ func NewRandHound(node *onet.TreeNodeInstance) (onet.ProtocolInstance, error) {
 func (rh *RandHound) Setup(nodes int, groups int, purpose string) error {
 	var err error
 
-	// Setup session
+	// Setup session information
 	if rh.Session, err = rh.newSession(nodes, groups, purpose, time.Time{}, nil, rh.Public()); err != nil {
 		return err
 	}
 
-	// Setup CoSi instance
-	rh.CoSi = cosi.NewCosi(rh.Suite(), rh.Private(), rh.Roster().Publics())
+	// Setup message buffers
+	rh.Messages = rh.newMessages()
 
+	// Setup CoSi instance
+	rh.cosi = cosi.NewCosi(rh.Suite(), rh.Private(), rh.Roster().Publics())
+
+	// Setup other stuff
 	rh.records = make(map[int]map[int]*Record)
 	rh.commits = make(map[int]abstract.Point)
-	rh.i2s = make(map[int]*I2)
-	rh.r1s = make(map[int]*R1)
-	rh.r2s = make(map[int]*R2)
-	rh.r3s = make(map[int]*R3)
 	rh.Done = make(chan bool, 1)
 	rh.SecretReady = false
 
@@ -135,7 +135,7 @@ func (rh *RandHound) Random() ([]byte, *Transcript, error) {
 		Keys:       rh.Roster().Publics(),
 		Thresholds: rh.thresholds,
 		SID:        rh.sid,
-		CoSig:      rh.CoSig,
+		CoSig:      rh.cosig,
 		Records:    rh.records,
 	}
 
