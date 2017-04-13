@@ -1,9 +1,11 @@
 package lib
 
 import (
-	"github.com/dedis/crypto/abstract"
-	"github.com/dedis/crypto/random"
+	"gopkg.in/dedis/crypto.v0/abstract"
+	//"github.com/lihiid/Crypto/abstract"
+	"gopkg.in/dedis/crypto.v0/random"
 )
+
 
 //performs elgamal encryption of a message, with the following invariant:
 //forall message1, message2, if message1==message2 --> M1==M2(two identical messages are encoded into two identical points)

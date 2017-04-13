@@ -3,7 +3,8 @@ package lib
 
 import (
 	"testing"
-	"github.com/dedis/crypto/nist"
+	"gopkg.in/dedis/crypto.v0/nist"
+	//"github.com/lihiid/Crypto/nist"
 )
 
 func TestPH(t *testing.T) {
