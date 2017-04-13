@@ -2,9 +2,10 @@ package protocol
 
 import (
 	"fmt"
-	"github.com/dedis/cothority/ppsi/lib"
-	"github.com/dedis/crypto/abstract"
-	"github.com/dedis/onet"
+	"github.com/lihiid/ppsi/lib"
+        "gopkg.in/dedis/crypto.v0/abstract"
+	//"github.com/lihiid/Crypto/abstract"
+	"gopkg.in/dedis/onet.v1"
 )
 
 func init() {
@@ -315,6 +316,7 @@ func (c *PPSI) handleFullyPhEncryptedMessage(in *FullyPhEncryptedMessage) error 
 
 	return nil
 }
+
 //Remove one layer of PH encryption with the conode PH key
 func (c *PPSI) handlePartiallyPhDecryptedMessage(in *PartiallyPhDecryptedMessage) error {
 	if in.WantTodec == 0 {
