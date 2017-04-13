@@ -3,13 +3,15 @@ package main
 import (
 	"fmt"
 	"github.com/BurntSushi/toml"
-	"github.com/dedis/cothority/ppsi/protocol"
-	"github.com/dedis/cothority/ppsi/lib"
-	"github.com/dedis/onet"
-	"github.com/dedis/onet/log"
-	"github.com/dedis/onet/network"
-	"github.com/dedis/onet/simul"
-	"github.com/dedis/onet/simul/monitor"
+	"github.com/lihiid/ppsi/protocol"
+	"github.com/lihiid/ppsi/lib"
+	"gopkg.in/dedis/onet.v1"
+	"gopkg.in/dedis/onet.v1/log"
+	"gopkg.in/dedis/onet.v1/network"
+	"gopkg.in/dedis/onet.v1/simul/monitor"
+	"gopkg.in/dedis/onet.v1/simul"
+	"os"
+	"bufio"
 )
 
 func init() {
@@ -29,7 +31,7 @@ func NewSimulation(config string) (onet.Simulation, error) {
 	return jvs, nil
 }
 
-// Setup configures a JVSS simulation
+
 func (jvs *Simulation) Setup(dir string, hosts []string) (*onet.SimulationConfig, error) {
 	sim := new(onet.SimulationConfig)
 	jvs.CreateRoster(sim, hosts, 2000)
@@ -39,13 +41,13 @@ func (jvs *Simulation) Setup(dir string, hosts []string) (*onet.SimulationConfig
 
 func (jvs *Simulation) Run(config *onet.SimulationConfig) error {
 
-	set1 := []string{"543323345", "543323045", "843323345", "213323045", "843323345"}
-	set2 := []string{"543323345", "543323045", "843343345", "213323045", "843323345"}
-	set3 := []string{"543323345", "543323045", "843323345", "213323045", "843323345"}
-	set4 := []string{"543323345", "543323045", "843333345", "548323032", "213323045"}
-	set5 := []string{"543323345", "543323045", "843323345", "543323245", "213323045"}
-	set6 := []string{"543323345", "543323045", "843333345", "543323032", "213323045"}
-
+	set1, _ := readSets("../set1.txt")
+	set2, _ := readSets("../set2.txt")
+	set3, _ := readSets("../set3.txt")
+	set4, _ := readSets("../set4.txt")
+	set5, _ := readSets("../set5.txt")
+	set6, _ := readSets("../set6.txt")
+	
 	setsToEncrypt := [][]string{set1, set2, set3, set4, set5, set6}
 
 	suite := network.Suite
@@ -95,4 +97,21 @@ func (jvs *Simulation) Run(config *onet.SimulationConfig) error {
 
 func main() {
 	simul.Start()
+}
+
+func readSets(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		return nil, err
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+
+	return lines, scanner.Err()
 }
