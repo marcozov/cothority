@@ -25,7 +25,7 @@ func NewPH(suite abstract.Suite) *PH {
 //Create encryption and decryption keys
 func (c *PH) createKeys() {
 
-	b:=c.suite.Scalar().Zero()
+	//b:=c.suite.Scalar().Zero()
 	enckey := c.suite.Scalar().Pick(random.Stream)
 
 	//for !c.suite.Scalar().Gcd(enckey,b).Equal(c.suite.Scalar().One()) {
